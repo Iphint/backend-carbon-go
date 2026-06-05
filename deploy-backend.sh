@@ -1,30 +1,28 @@
 #!/bin/bash
 set -e
 
-echo "======================"
-echo "DEPLOY BACKEND"
-echo "======================"
+cd ~/green-web/backend
 
-cd /root/green-web/backend
-bash deploy-backend.sh
+echo "Pull latest backend..."
+git pull origin main
 
 
-echo "======================"
-echo "DEPLOY FRONTEND"
-echo "======================"
-
-cd /root/green-web/frontend
-bash deploy-frontend.sh
+echo "Deploy backend with Docker..."
+docker compose down
+docker compose up -d --build
 
 
-echo "======================"
-echo "DEPLOY ADMINISTRATOR"
-echo "======================"
-
-cd /root/green-web/administrator
-bash deploy-admin.sh
+echo "Docker status..."
+docker ps
 
 
-echo "======================"
-echo "ALL DEPLOY SUCCESS"
-echo "======================"
+echo "Docker logs..."
+docker compose logs --tail=100
+
+
+echo "Reload Nginx..."
+sudo nginx -t
+sudo systemctl reload nginx
+
+
+echo "Deploy backend selesai."
