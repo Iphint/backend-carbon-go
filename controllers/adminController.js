@@ -354,8 +354,8 @@ export async function userProgress(req, res, next) {
       query(
         `SELECT b.id, b.name, b.description, b.icon,
                 CASE
-                  WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Journey Points')
-                  ELSE CONCAT('Dapatkan ', b.requirement_value, ' Poin Perjalanan')
+                  WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Carbon Unit (CU)')
+                  ELSE CONCAT('Dapatkan ', b.requirement_value, ' Carbon Unit (CU)')
                 END AS requirement,
                 CASE WHEN ub.id IS NULL THEN 0 ELSE 1 END AS achieved,
                 ub.earned_at AS achieved_at
@@ -416,8 +416,8 @@ export async function ecoBadges(req, res, next) {
     const rows = await query(
       `SELECT b.id, b.name, b.description, b.icon, b.requirement_type, b.requirement_value,
               CASE
-                WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Journey Points')
-                ELSE CONCAT('Dapatkan ', b.requirement_value, ' Poin Perjalanan')
+                WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Carbon Unit (CU)')
+                ELSE CONCAT('Dapatkan ', b.requirement_value, ' Carbon Unit (CU)')
               END AS requirement,
               COUNT(ub.id) AS achieved_count,
               MAX(ub.earned_at) AS achieved_at,

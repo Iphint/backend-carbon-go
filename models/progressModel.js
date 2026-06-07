@@ -161,7 +161,7 @@ export async function syncUserAwards(userId) {
 
   const milestones = await query("SELECT * FROM milestones ORDER BY target_value", {});
   for (const milestone of milestones) {
-    const completed = totalCarbon >= Number(milestone.target_value);
+    const completed = journeyPoints >= Number(milestone.target_value);
     await query(
       `INSERT INTO user_milestones
        (user_id, milestone_id, progress_value, is_completed, completed_at)
@@ -173,7 +173,7 @@ export async function syncUserAwards(userId) {
       {
         userId,
         milestoneId: milestone.id,
-        progressValue: totalCarbon,
+        progressValue: journeyPoints,
         isCompleted: completed ? 1 : 0,
         completedAt: completed ? new Date() : null
       }

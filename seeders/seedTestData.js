@@ -14,7 +14,7 @@ const names = [
   "Ardi Kurnia", "Bella Anindya", "Chandra Surya", "Dewi Anggraini", "Elang Baskara"
 ];
 
-const genders = ["female", "male", "other", "prefer_not_to_say"];
+const genders = ["female", "male"];
 const notes = [
   "Daily school routine",
   "Weekend eco action",
