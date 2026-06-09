@@ -30,36 +30,35 @@ services:
       UPLOAD_LIMIT: 128M
     ports:
       - "8080:80"
-
-  backend:
+    backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: carbon-go-backend
-    restart: unless-stopped
-    env_file:
-      - .env.development
-    depends_on:
-      mysql:
-        condition: service_healthy
-    environment:
-      NODE_ENV: development
-      PORT: 5000
-      FRONTEND_URL: http://localhost:5173
-      DASHBOARD_URL: http://localhost:5174
-      CORS_ORIGINS: ${CORS_ORIGINS:-}
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: root
-      DB_NAME: carbon_go
-      JWT_SECRET: docker_dev_change_this_secret
-      JWT_EXPIRES_IN: 7d
-    ports:
-      - "5001:5000"
-    volumes:
-      - ../database:/app/database:ro
-    command: sh -c "npm start"
+      container_name: carbon-go-backend
+      restart: unless-stopped
+      env_file:
+        - ${ENV_FILE:-.env.production}
+      depends_on:
+        mysql:
+          condition: service_healthy
+      environment:
+        NODE_ENV: ${NODE_ENV:-production}
+        PORT: 5000
+        FRONTEND_URL: ${FRONTEND_URL:-https://carbongo.site}
+        DASHBOARD_URL: ${DASHBOARD_URL:-https://admin.carbongo.site}
+        CORS_ORIGINS: ${CORS_ORIGINS:-https://carbongo.site,https://www.carbongo.site,https://admin.carbongo.site}
+        DB_HOST: mysql
+        DB_PORT: 3306
+        DB_USER: root
+        DB_PASSWORD: root
+        DB_NAME: carbon_go
+        JWT_SECRET: ${JWT_SECRET:-change_this_secret}
+        JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      ports:
+        - "5001:5000"
+      volumes:
+        - ../database:/app/database:ro
+      command: sh -c "npm start"
 
 volumes:
   carbon_go_mysql_data:
