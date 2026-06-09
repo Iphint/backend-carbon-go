@@ -1,11 +1,11 @@
-import dotenv from "dotenv";
 import mysql from "mysql2/promise";
 import { readdir, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnv } from "../config/loadEnv.js";
 
-dotenv.config();
+loadEnv();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const databaseDir = join(__dirname, "../../database");

@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import dotenv from "dotenv";
+import { loadEnv } from "./config/loadEnv.js";
 import authRoutes from "./routes/authRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import activityRoutes from "./routes/activityRoutes.js";
@@ -13,7 +13,7 @@ import milestoneRoutes from "./routes/milestoneRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 
-dotenv.config();
+loadEnv();
 
 const envOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")

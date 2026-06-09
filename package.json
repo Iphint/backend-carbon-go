@@ -5,9 +5,13 @@
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
+    "dev:prod": "NODE_ENV=production nodemon server.js",
     "start": "node server.js",
+    "start:prod": "NODE_ENV=production node server.js",
     "migrate": "node scripts/migrateDatabase.js",
+    "migrate:prod": "NODE_ENV=production node scripts/migrateDatabase.js",
     "seed": "node seeders/seed.js",
+    "seed:prod": "NODE_ENV=production node seeders/seed.js",
     "seed:test": "node seeders/seedTestData.js"
   },
   "dependencies": {

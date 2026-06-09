@@ -1,10 +1,39 @@
+# Dependencies
 node_modules/
+
+# Environment files
 .env
+.env.development
+.env.production
 .env.local
 .env.*.local
+!.env.example
+
+# Build output
 dist/
 build/
-.DS_Store
+
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+
+# Runtime/cache files
+.cache/
+.tmp/
+tmp/
+temp/
+coverage/
+
+# Uploaded/generated assets
+uploads/
+public/uploads/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

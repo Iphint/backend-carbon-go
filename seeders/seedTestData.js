@@ -1,9 +1,9 @@
 import bcrypt from "bcrypt";
-import dotenv from "dotenv";
+import { loadEnv } from "../config/loadEnv.js";
 import { pool, query } from "../config/db.js";
 import { syncUserAwards } from "../models/progressModel.js";
 
-dotenv.config();
+loadEnv();
 
 const names = [
   "Alya Putri", "Bima Santoso", "Citra Lestari", "Dimas Pratama", "Eka Wibowo",

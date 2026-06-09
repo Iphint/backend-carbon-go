@@ -37,6 +37,8 @@ services:
       dockerfile: Dockerfile
     container_name: carbon-go-backend
     restart: unless-stopped
+    env_file:
+      - .env.development
     depends_on:
       mysql:
         condition: service_healthy

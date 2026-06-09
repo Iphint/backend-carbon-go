@@ -1,11 +1,11 @@
-import dotenv from "dotenv";
 import bcrypt from "bcrypt";
 import mysql from "mysql2/promise";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnv } from "../config/loadEnv.js";
 
-dotenv.config();
+loadEnv();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, "../../database/schema.sql");
