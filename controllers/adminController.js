@@ -241,6 +241,56 @@ export async function users(req, res, next) {
   }
 }
 
+export async function surveyLogs(req, res, next) {
+  try {
+    const rows = await query(
+      `SELECT u.id AS user_id,
+              u.username,
+              u.email,
+              CASE WHEN COUNT(today_logs.id) > 0 THEN 'completed' ELSE 'not_completed' END AS daily_survey_status,
+              MAX(today_logs.created_at) AS completed_at
+       FROM users u
+       LEFT JOIN user_activity_logs today_logs
+         ON today_logs.user_id = u.id
+        AND DATE(today_logs.created_at) = CURDATE()
+       WHERE u.role <> 'admin'
+       GROUP BY u.id
+       ORDER BY u.username ASC`
+    );
+
+    res.json({ logs: rows });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function userSurveyLogs(req, res, next) {
+  try {
+    const userRows = await query(
+      "SELECT id, username, email FROM users WHERE id = :userId AND role <> 'admin'",
+      { userId: req.params.id }
+    );
+    if (!userRows.length) return res.status(404).json({ message: "User not found" });
+
+    const history = await query(
+      `SELECT DATE(created_at) AS survey_date,
+              'completed' AS status,
+              COUNT(*) AS total_entries,
+              MIN(created_at) AS first_entry_at,
+              MAX(created_at) AS last_entry_at
+       FROM user_activity_logs
+       WHERE user_id = :userId
+       GROUP BY DATE(created_at)
+       ORDER BY DATE(created_at) DESC`,
+      { userId: req.params.id }
+    );
+
+    res.json({ user: userRows[0], history });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function userById(req, res, next) {
   try {
     const rows = await enrichUsers(await baseUserRows());

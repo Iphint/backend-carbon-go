@@ -20,6 +20,7 @@ import {
   quests,
   createRankLog,
   rankLogs,
+  surveyLogs,
   updateRankLog,
   updateActivityLog,
   updateBadge,
@@ -29,6 +30,7 @@ import {
   userActivityLogs,
   userById,
   userProgress,
+  userSurveyLogs,
   users
 } from "../controllers/adminController.js";
 import { requireAdmin, requireAuth } from "../middleware/authMiddleware.js";
@@ -39,12 +41,14 @@ router.use(requireAuth, requireAdmin);
 
 router.get("/dashboard-summary", dashboardSummary);
 router.get("/users", users);
+router.get("/survey-logs", surveyLogs);
 router.get("/users/:id", userById);
 router.delete("/users/:id", deleteUser);
 router.get("/users/:id/activity-logs", userActivityLogs);
 router.get("/users/:id/custom-green-actions", customGreenActions);
 router.get("/users/:id/progress", userProgress);
 router.get("/users/:id/rank-logs", rankLogs);
+router.get("/users/:id/survey-logs", userSurveyLogs);
 router.get("/activity-logs", activityLogs);
 router.put("/activity-logs/:id", updateActivityLog);
 router.delete("/activity-logs/:id", deleteActivityLogAdmin);
