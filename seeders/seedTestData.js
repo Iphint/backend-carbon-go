@@ -113,6 +113,16 @@ async function seedActivityLogs(userId, activities, userIndex) {
     );
   }
 
+  await query(
+    `INSERT INTO daily_survey_logs (user_id, survey_date, completed_at)
+     SELECT user_id, DATE(created_at), MIN(created_at)
+     FROM user_activity_logs
+     WHERE user_id = :userId
+     GROUP BY user_id, DATE(created_at)
+     ON DUPLICATE KEY UPDATE completed_at = VALUES(completed_at)`,
+    { userId }
+  );
+
   await syncUserAwards(userId);
 }
 

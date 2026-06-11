@@ -5,7 +5,7 @@ import { query } from "../config/db.js";
 
 function validateProfile(body) {
   const { full_name, address, gender, phone_number } = body;
-  return Boolean(full_name && address && gender && phone_number);
+  return Boolean(full_name && address && gender && phone_number && /^\d+$/.test(String(phone_number).trim()));
 }
 
 export async function getMyProfile(req, res, next) {
@@ -35,7 +35,7 @@ export async function getMyProfile(req, res, next) {
 export async function onboarding(req, res, next) {
   try {
     if (!validateProfile(req.body)) {
-      return res.status(400).json({ message: "Full name, address, gender, and phone number are required" });
+      return res.status(400).json({ message: "Full name, address, gender, and numeric phone number are required" });
     }
     const [profile] = await Profile.upsert(req.user.id, req.body);
     res.status(201).json({ message: "Onboarding completed", profile });
@@ -47,7 +47,7 @@ export async function onboarding(req, res, next) {
 export async function updateMyProfile(req, res, next) {
   try {
     if (!validateProfile(req.body)) {
-      return res.status(400).json({ message: "Full name, address, gender, and phone number are required" });
+      return res.status(400).json({ message: "Full name, address, gender, and numeric phone number are required" });
     }
     const [profile] = await Profile.upsert(req.user.id, req.body);
     res.json({ message: "Profile updated", profile });

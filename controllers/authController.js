@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import { User } from "../models/userModel.js";
 import { Profile } from "../models/profileModel.js";
-import { clearAuthCookie, setAuthCookie, signToken } from "../utils/auth.js";
+import { clearAdminAuthCookie, clearAuthCookie, setAdminAuthCookie, setAuthCookie, signAdminToken, signToken } from "../utils/auth.js";
 import { syncUserAwards } from "../models/progressModel.js";
 
 function cleanUser(user) {
@@ -51,17 +51,53 @@ export async function login(req, res, next) {
       return res.status(401).json({ message: "Invalid username or password" });
     }
 
-    const token = signToken(user);
-    setAuthCookie(res, token);
+    const mainToken = signToken(user);
+    const isAdmin = (user.role || "user") === "admin";
+    const token = isAdmin ? signAdminToken(user) : mainToken;
+    setAuthCookie(res, mainToken);
+    if (isAdmin) {
+      setAdminAuthCookie(res, token);
+    }
     const profile = await Profile.findByUserId(user.id);
-    if ((user.role || "user") !== "admin") {
+    if (!isAdmin) {
       await syncUserAwards(user.id);
     }
 
     res.json({
       message: "Login success",
+      token,
       user: cleanUser(user),
       onboardingComplete: Boolean(profile.length)
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function adminLogin(req, res, next) {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ message: "Username and password are required" });
+    }
+
+    const users = await User.findByUsername(username);
+    const user = users[0];
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ message: "Invalid username or password" });
+    }
+    if ((user.role || "user") !== "admin") {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+
+    const token = signAdminToken(user);
+    setAdminAuthCookie(res, token);
+
+    res.json({
+      message: "Admin login success",
+      token,
+      user: cleanUser(user),
+      onboardingComplete: true
     });
   } catch (error) {
     next(error);
@@ -81,7 +117,19 @@ export async function me(req, res, next) {
   }
 }
 
+export function adminMe(req, res) {
+  res.json({
+    user: req.user,
+    onboardingComplete: true
+  });
+}
+
 export function logout(req, res) {
   clearAuthCookie(res);
   res.json({ message: "Logout success" });
+}
+
+export function adminLogout(req, res) {
+  clearAdminAuthCookie(res);
+  res.json({ message: "Admin logout success" });
 }

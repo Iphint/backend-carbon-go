@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { loadEnv } from "./config/loadEnv.js";
 import authRoutes from "./routes/authRoutes.js";
+import adminAuthRoutes from "./routes/adminAuthRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import activityRoutes from "./routes/activityRoutes.js";
 import progressRoutes from "./routes/progressRoutes.js";
@@ -48,7 +49,7 @@ function isPrivateLanHost(hostname) {
   );
 }
 
-function isAllowedOrigin(origin) {
+export function isAllowedOrigin(origin) {
   if (!origin) return true;
   if (allowedOrigins.has(origin)) return true;
 
@@ -82,6 +83,7 @@ app.use(cookieParser());
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);
+app.use("/api/admin-auth", adminAuthRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api", activityRoutes);
 app.use("/api/progress", progressRoutes);

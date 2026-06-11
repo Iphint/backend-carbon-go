@@ -1,4 +1,5 @@
 import { query } from "../config/db.js";
+import { ensureDailySurveyTable, jakartaDate, nextJakartaSurveyReset, surveyWindow } from "../models/dailySurveyModel.js";
 import { getQuestCatalog, syncUserAwards } from "../models/progressModel.js";
 
 const PAGE_SIZE = 20;
@@ -243,22 +244,38 @@ export async function users(req, res, next) {
 
 export async function surveyLogs(req, res, next) {
   try {
+    await ensureDailySurveyTable();
+    const date = req.query.date || jakartaDate();
+    const window = surveyWindow(date);
     const rows = await query(
       `SELECT u.id AS user_id,
               u.username,
               u.email,
-              CASE WHEN COUNT(today_logs.id) > 0 THEN 'completed' ELSE 'not_completed' END AS daily_survey_status,
-              MAX(today_logs.created_at) AS completed_at
+              CASE WHEN daily_logs.id IS NOT NULL OR activity_logs.completed_at IS NOT NULL THEN 'completed' ELSE 'not_completed' END AS daily_survey_status,
+              :date AS survey_date,
+              COALESCE(daily_logs.completed_at, activity_logs.completed_at) AS completed_at
        FROM users u
-       LEFT JOIN user_activity_logs today_logs
-         ON today_logs.user_id = u.id
-        AND DATE(today_logs.created_at) = CURDATE()
+       LEFT JOIN daily_survey_logs daily_logs
+         ON daily_logs.user_id = u.id
+        AND daily_logs.survey_date = :date
+       LEFT JOIN (
+         SELECT user_id, MIN(created_at) AS completed_at
+         FROM user_activity_logs
+         WHERE created_at >= :start
+           AND created_at < :end
+         GROUP BY user_id
+       ) activity_logs ON activity_logs.user_id = u.id
        WHERE u.role <> 'admin'
-       GROUP BY u.id
-       ORDER BY u.username ASC`
+       ORDER BY COALESCE(daily_logs.completed_at, activity_logs.completed_at) DESC, u.username ASC`,
+      { date, start: window.start, end: window.end }
     );
 
-    res.json({ logs: rows });
+    res.json({
+      logs: rows,
+      date,
+      server_time: new Date().toISOString(),
+      next_reset_at: nextJakartaSurveyReset()
+    });
   } catch (error) {
     next(error);
   }
@@ -266,6 +283,7 @@ export async function surveyLogs(req, res, next) {
 
 export async function userSurveyLogs(req, res, next) {
   try {
+    await ensureDailySurveyTable();
     const userRows = await query(
       "SELECT id, username, email FROM users WHERE id = :userId AND role <> 'admin'",
       { userId: req.params.id }
@@ -273,15 +291,28 @@ export async function userSurveyLogs(req, res, next) {
     if (!userRows.length) return res.status(404).json({ message: "User not found" });
 
     const history = await query(
-      `SELECT DATE(created_at) AS survey_date,
+      `SELECT survey_date,
               'completed' AS status,
-              COUNT(*) AS total_entries,
-              MIN(created_at) AS first_entry_at,
-              MAX(created_at) AS last_entry_at
-       FROM user_activity_logs
-       WHERE user_id = :userId
-       GROUP BY DATE(created_at)
-       ORDER BY DATE(created_at) DESC`,
+              MIN(first_entry_at) AS first_entry_at,
+              MAX(last_entry_at) AS last_entry_at
+       FROM (
+         SELECT survey_date,
+                completed_at AS first_entry_at,
+                completed_at AS last_entry_at
+         FROM daily_survey_logs
+         WHERE user_id = :userId
+
+         UNION ALL
+
+         SELECT DATE(DATE_SUB(created_at, INTERVAL 5 HOUR)) AS survey_date,
+                MIN(created_at) AS first_entry_at,
+                MAX(created_at) AS last_entry_at
+         FROM user_activity_logs
+         WHERE user_id = :userId
+         GROUP BY DATE(DATE_SUB(created_at, INTERVAL 5 HOUR))
+       ) survey_history
+       GROUP BY survey_date
+       ORDER BY survey_date DESC`,
       { userId: req.params.id }
     );
 
