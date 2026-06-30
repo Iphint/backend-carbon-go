@@ -122,7 +122,7 @@ function filterLogsClause(req, userId = null) {
   if (req.query.filter === "neutral") filters.push("l.activity_id IS NOT NULL AND l.carbon_value = 0");
   if (req.query.filter === "default") filters.push("l.activity_id IS NOT NULL AND l.carbon_value <> 0");
   if (req.query.date) {
-    filters.push("DATE(l.created_at) = :date");
+    filters.push("DATE(l.created_at + INTERVAL 7 HOUR) = :date");
     params.date = req.query.date;
   }
   return { where: filters.join(" AND "), params };
@@ -344,6 +344,43 @@ export async function activityLogs(req, res, next) {
 export async function userActivityLogs(req, res, next) {
   try {
     res.json(await getLogs(req, req.params.id));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function userPointLogs(req, res, next) {
+  try {
+    const userId = req.params.id;
+
+    const rows = await query(
+      `SELECT
+        DATE(l.created_at + INTERVAL 7 HOUR) AS date,
+        SUM(CASE WHEN l.carbon_value > 0 THEN l.carbon_value ELSE 0 END) AS points_in,
+        SUM(CASE WHEN l.carbon_value < 0 THEN ABS(l.carbon_value) ELSE 0 END) AS points_out,
+        SUM(l.carbon_value) AS net_points,
+        COUNT(l.id) AS total_activities
+      FROM user_activity_logs l
+      WHERE l.user_id = :userId
+      GROUP BY DATE(l.created_at + INTERVAL 7 HOUR)
+      ORDER BY date ASC`,
+      { userId }
+    );
+
+    let runningTotal = 0;
+    const logs = rows.map((row) => {
+      runningTotal += Number(row.net_points || 0);
+      return {
+        date: row.date,
+        points_in: Number(row.points_in || 0),
+        points_out: Number(row.points_out || 0),
+        net_points: Number(row.net_points || 0),
+        cumulative: runningTotal,
+        total_activities: Number(row.total_activities || 0),
+      };
+    });
+
+    res.json({ logs, total_cumulative: runningTotal });
   } catch (error) {
     next(error);
   }
