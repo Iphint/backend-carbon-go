@@ -39,23 +39,24 @@ Tim Carbon-Go`;
 
   const transporter = getTransporter();
 
-  if (transporter) {
-    try {
-      const info = await transporter.sendMail({
-        from: process.env.SMTP_FROM || "noreply@carbongo.site",
-        to: email,
-        subject,
-        text,
-      });
-  
-      console.log("✅ Email berhasil dikirim");
-      console.log(info);
-    } catch (err) {
-      console.error("❌ Gagal mengirim email:");
-      console.error(err);
-    }
+  if (!transporter) {
+    console.error(`[Password Reset] SMTP not configured! Cannot send email to ${email}. Code: ${code}`);
+    throw new Error("Email service not configured. Please contact support.");
   }
 
-  console.log(`[Password Reset] Code for ${username} (${email}): ${code}`);
-  console.log(`[Password Reset] Email sending ${transporter ? "configured - sent to " + email : "not configured - code logged above"}`);
+  try {
+    const info = await transporter.sendMail({
+      from: process.env.SMTP_FROM || "noreply@carbongo.site",
+      to: email,
+      subject,
+      text,
+    });
+
+    console.log(`[Password Reset] Email sent to ${email}`);
+    console.log(info);
+  } catch (err) {
+    console.error(`[Password Reset] Failed to send email to ${email}:`);
+    console.error(err);
+    throw new Error("Failed to send reset code email. Please try again later.");
+  }
 }

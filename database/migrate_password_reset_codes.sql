@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS password_reset_codes (
   user_id BIGINT UNSIGNED NOT NULL,
   email VARCHAR(180) NOT NULL,
   code VARCHAR(8) NOT NULL,
-  expires_at DATETIME NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
   used BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_password_reset_email_code (email, code),

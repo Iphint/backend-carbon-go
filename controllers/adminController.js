@@ -31,13 +31,24 @@ async function ensureRankTypesTable() {
     `CREATE TABLE IF NOT EXISTS rank_types (
       id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(40) NOT NULL UNIQUE,
+      name_en VARCHAR(40) NULL,
+      name_id VARCHAR(40) NULL,
+      description_en TEXT NULL,
+      description_id TEXT NULL,
+      milestone_id BIGINT UNSIGNED NULL,
+      badge_id BIGINT UNSIGNED NULL,
+      quest_id BIGINT UNSIGNED NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )`
   );
 
   for (const rankName of ADMIN_RANK_TYPES) {
-    await query("INSERT IGNORE INTO rank_types (name) VALUES (:rankName)", { rankName });
+    await query(
+      `INSERT IGNORE INTO rank_types (name, name_en, name_id)
+       VALUES (:rankName, :rankName, :rankName)`,
+      { rankName }
+    );
   }
 }
 
@@ -512,15 +523,20 @@ export async function userProgress(req, res, next) {
 
 export async function milestones(req, res, next) {
   try {
+    const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
     const rows = await query(
-      `SELECT m.id, m.name, m.description, m.target_value AS target,
+      `SELECT m.id, m.name, m.name_en, m.name_id, m.description, m.description_en, m.description_id,
+              m.target_value AS target,
+              CASE WHEN :lang = 'en' THEN COALESCE(m.name_en, m.name) ELSE COALESCE(m.name_id, m.name) END AS display_name,
+              CASE WHEN :lang = 'en' THEN COALESCE(m.description_en, m.description) ELSE COALESCE(m.description_id, m.description) END AS display_description,
               COUNT(um.id) AS achieved_count,
               MAX(um.completed_at) AS achieved_at,
               CASE WHEN COUNT(um.id) > 0 THEN 1 ELSE 0 END AS achieved
        FROM milestones m
        LEFT JOIN user_milestones um ON um.milestone_id = m.id AND um.is_completed = 1
        GROUP BY m.id
-       ORDER BY m.target_value`
+       ORDER BY m.target_value`,
+      { lang }
     );
     res.json({ milestones: rows });
   } catch (error) {
@@ -532,7 +548,10 @@ export async function ecoBadges(req, res, next) {
   try {
     const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
     const rows = await query(
-      `SELECT b.id, b.name, b.description, b.icon, b.requirement_type, b.requirement_value,
+      `SELECT b.id, b.name, b.name_en, b.name_id, b.description, b.description_en, b.description_id,
+              b.icon, b.requirement_type, b.requirement_value,
+              CASE WHEN :lang = 'en' THEN COALESCE(b.name_en, b.name) ELSE COALESCE(b.name_id, b.name) END AS display_name,
+              CASE WHEN :lang = 'en' THEN COALESCE(b.description_en, b.description) ELSE COALESCE(b.description_id, b.description) END AS display_description,
               CASE
                 WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Carbon Unit (CU)')
                 ELSE CONCAT('Dapatkan ', b.requirement_value, ' Carbon Unit (CU)')
@@ -555,6 +574,7 @@ export async function ecoBadges(req, res, next) {
 
 export async function quests(req, res, next) {
   try {
+    const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
     const catalog = await getQuestCatalog(0);
     const achievementRows = await query(
       `SELECT q.id, COUNT(t.user_id) AS achieved_count
@@ -577,7 +597,13 @@ export async function quests(req, res, next) {
       slug: quest.slug,
       icon: quest.icon,
       name: quest.name,
+      name_en: quest.name_en,
+      name_id: quest.name_id,
       description: quest.description,
+      description_en: quest.description_en,
+      description_id: quest.description_id,
+      display_name: lang === 'en' ? (quest.name_en || quest.name) : (quest.name_id || quest.name),
+      display_description: lang === 'en' ? (quest.description_en || quest.description) : (quest.description_id || quest.description),
       progress: 0,
       target: quest.requirement_value,
       requirement_value: quest.requirement_value,
@@ -595,18 +621,22 @@ export async function quests(req, res, next) {
 
 export async function createQuest(req, res, next) {
   try {
-    const { slug, icon, name, description, requirement_value, reward, is_active } = req.body;
+    const { slug, icon, name, name_en, name_id, description, description_en, description_id, requirement_value, reward, is_active } = req.body;
     if (!slug || !name || !description || requirement_value == null) {
       return res.status(400).json({ message: "slug, name, description, and requirement_value are required" });
     }
     const result = await query(
-      `INSERT INTO quests (slug, icon, name, description, requirement_value, reward, is_active)
-       VALUES (:slug, :icon, :name, :description, :requirementValue, :reward, :isActive)`,
+      `INSERT INTO quests (slug, icon, name, name_en, name_id, description, description_en, description_id, requirement_value, reward, is_active)
+       VALUES (:slug, :icon, :name, :nameEn, :nameId, :description, :descriptionEn, :descriptionId, :requirementValue, :reward, :isActive)`,
       {
         slug,
         icon: icon || "🌱",
         name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
         description,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
         requirementValue: Number(requirement_value),
         reward: Number(reward || 25),
         isActive: is_active === false || is_active === 0 ? 0 : 1
@@ -620,10 +650,11 @@ export async function createQuest(req, res, next) {
 
 export async function updateQuest(req, res, next) {
   try {
-    const { slug, icon, name, description, requirement_value, reward, is_active } = req.body;
+    const { slug, icon, name, name_en, name_id, description, description_en, description_id, requirement_value, reward, is_active } = req.body;
     const result = await query(
       `UPDATE quests
-       SET slug = :slug, icon = :icon, name = :name, description = :description,
+       SET slug = :slug, icon = :icon, name = :name, name_en = :nameEn, name_id = :nameId,
+           description = :description, description_en = :descriptionEn, description_id = :descriptionId,
            requirement_value = :requirementValue, reward = :reward, is_active = :isActive
        WHERE id = :id`,
       {
@@ -631,7 +662,11 @@ export async function updateQuest(req, res, next) {
         slug,
         icon: icon || "🌱",
         name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
         description,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
         requirementValue: Number(requirement_value),
         reward: Number(reward || 25),
         isActive: is_active === false || is_active === 0 ? 0 : 1
@@ -685,9 +720,14 @@ export async function rankLogs(req, res, next) {
       counts.map((row) => [row.rank, Number(row.achieved_count || 0)])
     );
     const rankTypes = await query(
-      `SELECT id, name
-       FROM rank_types
-       ORDER BY FIELD(name, 'Guest', 'Explorer', 'Guardian', 'Hero'), name ASC`
+      `SELECT rt.id, rt.name, rt.name_en, rt.name_id, rt.description_en, rt.description_id,
+              rt.milestone_id, rt.badge_id, rt.quest_id,
+              m.name AS milestone_name, b.name AS badge_name, q.name AS quest_name
+       FROM rank_types rt
+       LEFT JOIN milestones m ON m.id = rt.milestone_id
+       LEFT JOIN badges b ON b.id = rt.badge_id
+       LEFT JOIN quests q ON q.id = rt.quest_id
+       ORDER BY FIELD(rt.name, 'Guest', 'Explorer', 'Guardian', 'Hero'), rt.name ASC`
     );
 
     res.json({
@@ -695,6 +735,16 @@ export async function rankLogs(req, res, next) {
         id: row.id,
         rank: row.name,
         rank_name: row.name,
+        name_en: row.name_en,
+        name_id: row.name_id,
+        description_en: row.description_en,
+        description_id: row.description_id,
+        milestone_id: row.milestone_id,
+        badge_id: row.badge_id,
+        quest_id: row.quest_id,
+        milestone_name: row.milestone_name,
+        badge_name: row.badge_name,
+        quest_name: row.quest_name,
         is_default: ADMIN_RANK_TYPES.includes(row.name),
         achieved_count: countByRank[row.name] || 0
       }))
@@ -707,17 +757,31 @@ export async function rankLogs(req, res, next) {
 export async function createRankLog(req, res, next) {
   try {
     await ensureRankTypesTable();
-    const rankName = String(req.body.rank_name || "").trim();
+    const { rank_name, name_en, name_id, description_en, description_id, milestone_id, badge_id, quest_id } = req.body;
+    const rankName = String(rank_name || "").trim();
 
     if (!rankName || rankName.length > 40) {
       return res.status(400).json({ message: "rank_name is required and must be 40 characters or less" });
     }
 
     await query(
-      `INSERT INTO rank_types (name)
-       VALUES (:rankName)
-       ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP`,
-      { rankName }
+      `INSERT INTO rank_types (name, name_en, name_id, description_en, description_id, milestone_id, badge_id, quest_id)
+       VALUES (:rankName, :nameEn, :nameId, :descriptionEn, :descriptionId, :milestoneId, :badgeId, :questId)
+       ON DUPLICATE KEY UPDATE
+         name_en = VALUES(name_en), name_id = VALUES(name_id),
+         description_en = VALUES(description_en), description_id = VALUES(description_id),
+         milestone_id = VALUES(milestone_id), badge_id = VALUES(badge_id), quest_id = VALUES(quest_id),
+         updated_at = CURRENT_TIMESTAMP`,
+      {
+        rankName,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        milestoneId: milestone_id || null,
+        badgeId: badge_id || null,
+        questId: quest_id || null
+      }
     );
     res.status(201).json({ message: "Rank type saved" });
   } catch (error) {
@@ -728,7 +792,8 @@ export async function createRankLog(req, res, next) {
 export async function updateRankLog(req, res, next) {
   try {
     await ensureRankTypesTable();
-    const rankName = String(req.body.rank_name || "").trim();
+    const { rank_name, name_en, name_id, description_en, description_id, milestone_id, badge_id, quest_id } = req.body;
+    const rankName = String(rank_name || "").trim();
 
     if (!rankName || rankName.length > 40) {
       return res.status(400).json({ message: "rank_name is required and must be 40 characters or less" });
@@ -741,8 +806,22 @@ export async function updateRankLog(req, res, next) {
     }
 
     await query(
-      "UPDATE rank_types SET name = :rankName WHERE id = :id",
-      { id: req.params.id, rankName }
+      `UPDATE rank_types
+       SET name = :rankName, name_en = :nameEn, name_id = :nameId,
+           description_en = :descriptionEn, description_id = :descriptionId,
+           milestone_id = :milestoneId, badge_id = :badgeId, quest_id = :questId
+       WHERE id = :id`,
+      {
+        id: req.params.id,
+        rankName,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        milestoneId: milestone_id || null,
+        badgeId: badge_id || null,
+        questId: quest_id || null
+      }
     );
     await query(
       "UPDATE user_rank_achievements SET rank_name = :rankName WHERE rank_name = :oldRankName",
@@ -827,14 +906,24 @@ export async function deleteActivityLogAdmin(req, res, next) {
 
 export async function createBadge(req, res, next) {
   try {
-    const { name, description, icon, requirement_type, requirement_value } = req.body;
+    const { name, name_en, name_id, description, description_en, description_id, icon, requirement_type, requirement_value } = req.body;
     if (!name || !description || !icon || !requirement_type || requirement_value == null) {
       return res.status(400).json({ message: "Badge fields are required" });
     }
     const result = await query(
-      `INSERT INTO badges (name, description, icon, requirement_type, requirement_value)
-       VALUES (:name, :description, :icon, :requirementType, :requirementValue)`,
-      { name, description, icon, requirementType: requirement_type, requirementValue: requirement_value }
+      `INSERT INTO badges (name, name_en, name_id, description, description_en, description_id, icon, requirement_type, requirement_value)
+       VALUES (:name, :nameEn, :nameId, :description, :descriptionEn, :descriptionId, :icon, :requirementType, :requirementValue)`,
+      {
+        name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        description,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        icon,
+        requirementType: requirement_type,
+        requirementValue: requirement_value
+      }
     );
     res.status(201).json({ message: "Badge created", id: result.insertId });
   } catch (error) {
@@ -844,13 +933,25 @@ export async function createBadge(req, res, next) {
 
 export async function updateBadge(req, res, next) {
   try {
-    const { name, description, icon, requirement_type, requirement_value } = req.body;
+    const { name, name_en, name_id, description, description_en, description_id, icon, requirement_type, requirement_value } = req.body;
     const result = await query(
       `UPDATE badges
-       SET name = :name, description = :description, icon = :icon,
-           requirement_type = :requirementType, requirement_value = :requirementValue
+       SET name = :name, name_en = :nameEn, name_id = :nameId,
+           description = :description, description_en = :descriptionEn, description_id = :descriptionId,
+           icon = :icon, requirement_type = :requirementType, requirement_value = :requirementValue
        WHERE id = :id`,
-      { id: req.params.id, name, description, icon, requirementType: requirement_type, requirementValue: requirement_value }
+      {
+        id: req.params.id,
+        name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        description,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        icon,
+        requirementType: requirement_type,
+        requirementValue: requirement_value
+      }
     );
     if (!result.affectedRows) return res.status(404).json({ message: "Badge not found" });
     res.json({ message: "Badge updated" });
@@ -871,11 +972,20 @@ export async function deleteBadge(req, res, next) {
 
 export async function createMilestone(req, res, next) {
   try {
-    const { name, description, target_value } = req.body;
+    const { name, name_en, name_id, description, description_en, description_id, target_value } = req.body;
     if (!name || !description || target_value == null) return res.status(400).json({ message: "Milestone fields are required" });
     const result = await query(
-      "INSERT INTO milestones (name, description, target_value) VALUES (:name, :description, :targetValue)",
-      { name, description, targetValue: target_value }
+      `INSERT INTO milestones (name, name_en, name_id, description, description_en, description_id, target_value)
+       VALUES (:name, :nameEn, :nameId, :description, :descriptionEn, :descriptionId, :targetValue)`,
+      {
+        name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        description,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        targetValue: target_value
+      }
     );
     res.status(201).json({ message: "Milestone created", id: result.insertId });
   } catch (error) {
@@ -885,10 +995,23 @@ export async function createMilestone(req, res, next) {
 
 export async function updateMilestone(req, res, next) {
   try {
-    const { name, description, target_value } = req.body;
+    const { name, name_en, name_id, description, description_en, description_id, target_value } = req.body;
     const result = await query(
-      "UPDATE milestones SET name = :name, description = :description, target_value = :targetValue WHERE id = :id",
-      { id: req.params.id, name, description, targetValue: target_value }
+      `UPDATE milestones
+       SET name = :name, name_en = :nameEn, name_id = :nameId,
+           description = :description, description_en = :descriptionEn, description_id = :descriptionId,
+           target_value = :targetValue
+       WHERE id = :id`,
+      {
+        id: req.params.id,
+        name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        description,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        targetValue: target_value
+      }
     );
     if (!result.affectedRows) return res.status(404).json({ message: "Milestone not found" });
     res.json({ message: "Milestone updated" });

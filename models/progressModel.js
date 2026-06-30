@@ -49,7 +49,11 @@ export async function ensureQuestCatalog() {
       slug VARCHAR(120) NOT NULL UNIQUE,
       icon VARCHAR(80) NOT NULL DEFAULT '🌱',
       name VARCHAR(160) NOT NULL,
+      name_en VARCHAR(160) NULL,
+      name_id VARCHAR(160) NULL,
       description TEXT NOT NULL,
+      description_en TEXT NULL,
+      description_id TEXT NULL,
       requirement_value INT NOT NULL DEFAULT 0,
       reward INT NOT NULL DEFAULT 25,
       is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -87,7 +91,8 @@ export async function ensureQuestCatalog() {
 export async function getQuestCatalog(totalCarbon = 0) {
   await ensureQuestCatalog();
   const quests = await query(
-    `SELECT id, slug, icon, name, description, requirement_value, reward, is_active, created_at, updated_at
+    `SELECT id, slug, icon, name, name_en, name_id, description, description_en, description_id,
+            requirement_value, reward, is_active, created_at, updated_at
      FROM quests
      WHERE is_active = 1
      ORDER BY requirement_value, id`
