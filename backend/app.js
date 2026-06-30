@@ -20,8 +20,7 @@ const envOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-
-  // Config allowed origins for CORS, including localhost, private LAN IPs, and production domains
+  
 const allowedOrigins = new Set([
   "http://localhost:5173",
   "http://localhost:5174",
