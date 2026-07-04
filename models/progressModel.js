@@ -1,4 +1,4 @@
-import { query } from "../config/db.js";
+import { query, isBilingualReady } from "../config/db.js";
 
 const defaultQuests = [
   { slug: "first-green-step", icon: "🌱", name: "🌱 First Green Step", description: "Log your first eco-action", requirement_value: 50, reward: 25 },
@@ -90,9 +90,10 @@ export async function ensureQuestCatalog() {
 
 export async function getQuestCatalog(totalCarbon = 0) {
   await ensureQuestCatalog();
+  const bilingual = await isBilingualReady();
   const quests = await query(
-    `SELECT id, slug, icon, name, name_en, name_id, description, description_en, description_id,
-            requirement_value, reward, is_active, created_at, updated_at
+    `SELECT id, slug, icon, name, ${bilingual ? "name_en, name_id, description_en, description_id," : ""}
+            description, requirement_value, reward, is_active, created_at, updated_at
      FROM quests
      WHERE is_active = 1
      ORDER BY requirement_value, id`

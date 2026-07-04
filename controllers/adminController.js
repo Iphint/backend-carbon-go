@@ -1,4 +1,4 @@
-import { query } from "../config/db.js";
+import { query, isBilingualReady } from "../config/db.js";
 import { ensureDailySurveyTable, jakartaDate, nextJakartaSurveyReset, surveyWindow } from "../models/dailySurveyModel.js";
 import { getQuestCatalog, syncUserAwards } from "../models/progressModel.js";
 
@@ -44,11 +44,20 @@ async function ensureRankTypesTable() {
   );
 
   for (const rankName of ADMIN_RANK_TYPES) {
-    await query(
-      `INSERT IGNORE INTO rank_types (name, name_en, name_id)
-       VALUES (:rankName, :rankName, :rankName)`,
-      { rankName }
-    );
+    const bilingual = await isBilingualReady();
+    if (bilingual) {
+      await query(
+        `INSERT IGNORE INTO rank_types (name, name_en, name_id)
+         VALUES (:rankName, :rankName, :rankName)`,
+        { rankName }
+      );
+    } else {
+      await query(
+        `INSERT IGNORE INTO rank_types (name)
+         VALUES (:rankName)`,
+        { rankName }
+      );
+    }
   }
 }
 
@@ -315,12 +324,12 @@ export async function userSurveyLogs(req, res, next) {
 
          UNION ALL
 
-         SELECT DATE(DATE_SUB(created_at, INTERVAL 5 HOUR)) AS survey_date,
+         SELECT DATE(created_at + INTERVAL 2 HOUR) AS survey_date,
                 MIN(created_at) AS first_entry_at,
                 MAX(created_at) AS last_entry_at
          FROM user_activity_logs
          WHERE user_id = :userId
-         GROUP BY DATE(DATE_SUB(created_at, INTERVAL 5 HOUR))
+         GROUP BY DATE(created_at + INTERVAL 2 HOUR)
        ) survey_history
        GROUP BY survey_date
        ORDER BY survey_date DESC`,
@@ -478,14 +487,15 @@ export async function userProgress(req, res, next) {
   try {
     const userId = req.params.id;
     const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const bilingual = await isBilingualReady();
     const awards = await syncUserAwards(userId);
     const [badges, milestones] = await Promise.all([
       query(
         `SELECT b.id, b.name, b.description, b.icon,
-                CASE
+                ${bilingual ? `CASE
                   WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Carbon Unit (CU)')
                   ELSE CONCAT('Dapatkan ', b.requirement_value, ' Carbon Unit (CU)')
-                END AS requirement,
+                END AS requirement,` : ""}
                 CASE WHEN ub.id IS NULL THEN 0 ELSE 1 END AS achieved,
                 ub.earned_at AS achieved_at
          FROM badges b
@@ -524,11 +534,13 @@ export async function userProgress(req, res, next) {
 export async function milestones(req, res, next) {
   try {
     const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const bilingual = await isBilingualReady();
     const rows = await query(
-      `SELECT m.id, m.name, m.name_en, m.name_id, m.description, m.description_en, m.description_id,
-              m.target_value AS target,
-              CASE WHEN :lang = 'en' THEN COALESCE(m.name_en, m.name) ELSE COALESCE(m.name_id, m.name) END AS display_name,
-              CASE WHEN :lang = 'en' THEN COALESCE(m.description_en, m.description) ELSE COALESCE(m.description_id, m.description) END AS display_description,
+      `SELECT m.id, m.name, m.target_value AS target,
+              ${bilingual ? "m.name_en, m.name_id, m.description_en, m.description_id," : ""}
+              m.description,
+              ${bilingual ? `CASE WHEN :lang = 'en' THEN COALESCE(m.name_en, m.name) ELSE COALESCE(m.name_id, m.name) END AS display_name,
+              CASE WHEN :lang = 'en' THEN COALESCE(m.description_en, m.description) ELSE COALESCE(m.description_id, m.description) END AS display_description,` : ""}
               COUNT(um.id) AS achieved_count,
               MAX(um.completed_at) AS achieved_at,
               CASE WHEN COUNT(um.id) > 0 THEN 1 ELSE 0 END AS achieved
@@ -547,11 +559,13 @@ export async function milestones(req, res, next) {
 export async function ecoBadges(req, res, next) {
   try {
     const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const bilingual = await isBilingualReady();
     const rows = await query(
-      `SELECT b.id, b.name, b.name_en, b.name_id, b.description, b.description_en, b.description_id,
-              b.icon, b.requirement_type, b.requirement_value,
-              CASE WHEN :lang = 'en' THEN COALESCE(b.name_en, b.name) ELSE COALESCE(b.name_id, b.name) END AS display_name,
-              CASE WHEN :lang = 'en' THEN COALESCE(b.description_en, b.description) ELSE COALESCE(b.description_id, b.description) END AS display_description,
+      `SELECT b.id, b.name, b.icon, b.requirement_type, b.requirement_value,
+              ${bilingual ? "b.name_en, b.name_id, b.description_en, b.description_id," : ""}
+              b.description,
+              ${bilingual ? `CASE WHEN :lang = 'en' THEN COALESCE(b.name_en, b.name) ELSE COALESCE(b.name_id, b.name) END AS display_name,
+              CASE WHEN :lang = 'en' THEN COALESCE(b.description_en, b.description) ELSE COALESCE(b.description_id, b.description) END AS display_description,` : ""}
               CASE
                 WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Carbon Unit (CU)')
                 ELSE CONCAT('Dapatkan ', b.requirement_value, ' Carbon Unit (CU)')
@@ -575,6 +589,7 @@ export async function ecoBadges(req, res, next) {
 export async function quests(req, res, next) {
   try {
     const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const bilingual = await isBilingualReady();
     const catalog = await getQuestCatalog(0);
     const achievementRows = await query(
       `SELECT q.id, COUNT(t.user_id) AS achieved_count
@@ -602,8 +617,8 @@ export async function quests(req, res, next) {
       description: quest.description,
       description_en: quest.description_en,
       description_id: quest.description_id,
-      display_name: lang === 'en' ? (quest.name_en || quest.name) : (quest.name_id || quest.name),
-      display_description: lang === 'en' ? (quest.description_en || quest.description) : (quest.description_id || quest.description),
+      display_name: bilingual ? (lang === 'en' ? (quest.name_en || quest.name) : (quest.name_id || quest.name)) : quest.name,
+      display_description: bilingual ? (lang === 'en' ? (quest.description_en || quest.description) : (quest.description_id || quest.description)) : quest.description,
       progress: 0,
       target: quest.requirement_value,
       requirement_value: quest.requirement_value,
@@ -625,18 +640,19 @@ export async function createQuest(req, res, next) {
     if (!slug || !name || !description || requirement_value == null) {
       return res.status(400).json({ message: "slug, name, description, and requirement_value are required" });
     }
+    const bilingual = await isBilingualReady();
     const result = await query(
-      `INSERT INTO quests (slug, icon, name, name_en, name_id, description, description_en, description_id, requirement_value, reward, is_active)
-       VALUES (:slug, :icon, :name, :nameEn, :nameId, :description, :descriptionEn, :descriptionId, :requirementValue, :reward, :isActive)`,
+      `INSERT INTO quests (slug, icon, name, ${bilingual ? "name_en, name_id, description_en, description_id," : ""} description, requirement_value, reward, is_active)
+       VALUES (:slug, :icon, :name, ${bilingual ? ":nameEn, :nameId, :descriptionEn, :descriptionId, " : ""} :description, :requirementValue, :reward, :isActive)`,
       {
         slug,
         icon: icon || "🌱",
         name,
         nameEn: name_en || null,
         nameId: name_id || null,
-        description,
         descriptionEn: description_en || null,
         descriptionId: description_id || null,
+        description,
         requirementValue: Number(requirement_value),
         reward: Number(reward || 25),
         isActive: is_active === false || is_active === 0 ? 0 : 1
@@ -651,11 +667,11 @@ export async function createQuest(req, res, next) {
 export async function updateQuest(req, res, next) {
   try {
     const { slug, icon, name, name_en, name_id, description, description_en, description_id, requirement_value, reward, is_active } = req.body;
+    const bilingual = await isBilingualReady();
     const result = await query(
       `UPDATE quests
-       SET slug = :slug, icon = :icon, name = :name, name_en = :nameEn, name_id = :nameId,
-           description = :description, description_en = :descriptionEn, description_id = :descriptionId,
-           requirement_value = :requirementValue, reward = :reward, is_active = :isActive
+       SET slug = :slug, icon = :icon, name = :name, ${bilingual ? "name_en = :nameEn, name_id = :nameId, description_en = :descriptionEn, description_id = :descriptionId," : ""}
+           description = :description, requirement_value = :requirementValue, reward = :reward, is_active = :isActive
        WHERE id = :id`,
       {
         id: req.params.id,
@@ -664,9 +680,9 @@ export async function updateQuest(req, res, next) {
         name,
         nameEn: name_en || null,
         nameId: name_id || null,
-        description,
         descriptionEn: description_en || null,
         descriptionId: description_id || null,
+        description,
         requirementValue: Number(requirement_value),
         reward: Number(reward || 25),
         isActive: is_active === false || is_active === 0 ? 0 : 1
@@ -692,6 +708,7 @@ export async function deleteQuest(req, res, next) {
 export async function rankLogs(req, res, next) {
   try {
     await ensureRankTypesTable();
+    const bilingual = await isBilingualReady();
 
     if (req.params.id) {
       await syncUserAwards(req.params.id);
@@ -720,13 +737,10 @@ export async function rankLogs(req, res, next) {
       counts.map((row) => [row.rank, Number(row.achieved_count || 0)])
     );
     const rankTypes = await query(
-      `SELECT rt.id, rt.name, rt.name_en, rt.name_id, rt.description_en, rt.description_id,
-              rt.milestone_id, rt.badge_id, rt.quest_id,
-              m.name AS milestone_name, b.name AS badge_name, q.name AS quest_name
+      `SELECT rt.id, rt.name
+              ${bilingual ? ", rt.name_en, rt.name_id, rt.description_en, rt.description_id, rt.milestone_id, rt.badge_id, rt.quest_id, m.name AS milestone_name, b.name AS badge_name, q.name AS quest_name" : ""}
        FROM rank_types rt
-       LEFT JOIN milestones m ON m.id = rt.milestone_id
-       LEFT JOIN badges b ON b.id = rt.badge_id
-       LEFT JOIN quests q ON q.id = rt.quest_id
+       ${bilingual ? "LEFT JOIN milestones m ON m.id = rt.milestone_id LEFT JOIN badges b ON b.id = rt.badge_id LEFT JOIN quests q ON q.id = rt.quest_id" : ""}
        ORDER BY FIELD(rt.name, 'Guest', 'Explorer', 'Guardian', 'Hero'), rt.name ASC`
     );
 
@@ -764,25 +778,35 @@ export async function createRankLog(req, res, next) {
       return res.status(400).json({ message: "rank_name is required and must be 40 characters or less" });
     }
 
-    await query(
-      `INSERT INTO rank_types (name, name_en, name_id, description_en, description_id, milestone_id, badge_id, quest_id)
-       VALUES (:rankName, :nameEn, :nameId, :descriptionEn, :descriptionId, :milestoneId, :badgeId, :questId)
-       ON DUPLICATE KEY UPDATE
-         name_en = VALUES(name_en), name_id = VALUES(name_id),
-         description_en = VALUES(description_en), description_id = VALUES(description_id),
-         milestone_id = VALUES(milestone_id), badge_id = VALUES(badge_id), quest_id = VALUES(quest_id),
-         updated_at = CURRENT_TIMESTAMP`,
-      {
-        rankName,
-        nameEn: name_en || null,
-        nameId: name_id || null,
-        descriptionEn: description_en || null,
-        descriptionId: description_id || null,
-        milestoneId: milestone_id || null,
-        badgeId: badge_id || null,
-        questId: quest_id || null
-      }
-    );
+    const bilingual = await isBilingualReady();
+    if (bilingual) {
+      await query(
+        `INSERT INTO rank_types (name, name_en, name_id, description_en, description_id, milestone_id, badge_id, quest_id)
+         VALUES (:rankName, :nameEn, :nameId, :descriptionEn, :descriptionId, :milestoneId, :badgeId, :questId)
+         ON DUPLICATE KEY UPDATE
+           name_en = VALUES(name_en), name_id = VALUES(name_id),
+           description_en = VALUES(description_en), description_id = VALUES(description_id),
+           milestone_id = VALUES(milestone_id), badge_id = VALUES(badge_id), quest_id = VALUES(quest_id),
+           updated_at = CURRENT_TIMESTAMP`,
+        {
+          rankName,
+          nameEn: name_en || null,
+          nameId: name_id || null,
+          descriptionEn: description_en || null,
+          descriptionId: description_id || null,
+          milestoneId: milestone_id || null,
+          badgeId: badge_id || null,
+          questId: quest_id || null
+        }
+      );
+    } else {
+      await query(
+        `INSERT INTO rank_types (name)
+         VALUES (:rankName)
+         ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP`,
+        { rankName }
+      );
+    }
     res.status(201).json({ message: "Rank type saved" });
   } catch (error) {
     next(error);
@@ -805,24 +829,32 @@ export async function updateRankLog(req, res, next) {
       return res.status(400).json({ message: "Default rank types cannot be edited" });
     }
 
-    await query(
-      `UPDATE rank_types
-       SET name = :rankName, name_en = :nameEn, name_id = :nameId,
-           description_en = :descriptionEn, description_id = :descriptionId,
-           milestone_id = :milestoneId, badge_id = :badgeId, quest_id = :questId
-       WHERE id = :id`,
-      {
-        id: req.params.id,
-        rankName,
-        nameEn: name_en || null,
-        nameId: name_id || null,
-        descriptionEn: description_en || null,
-        descriptionId: description_id || null,
-        milestoneId: milestone_id || null,
-        badgeId: badge_id || null,
-        questId: quest_id || null
-      }
-    );
+    const bilingual = await isBilingualReady();
+    if (bilingual) {
+      await query(
+        `UPDATE rank_types
+         SET name = :rankName, name_en = :nameEn, name_id = :nameId,
+             description_en = :descriptionEn, description_id = :descriptionId,
+             milestone_id = :milestoneId, badge_id = :badgeId, quest_id = :questId
+         WHERE id = :id`,
+        {
+          id: req.params.id,
+          rankName,
+          nameEn: name_en || null,
+          nameId: name_id || null,
+          descriptionEn: description_en || null,
+          descriptionId: description_id || null,
+          milestoneId: milestone_id || null,
+          badgeId: badge_id || null,
+          questId: quest_id || null
+        }
+      );
+    } else {
+      await query(
+        `UPDATE rank_types SET name = :rankName WHERE id = :id`,
+        { id: req.params.id, rankName }
+      );
+    }
     await query(
       "UPDATE user_rank_achievements SET rank_name = :rankName WHERE rank_name = :oldRankName",
       { rankName, oldRankName: rows[0].name }
@@ -910,16 +942,17 @@ export async function createBadge(req, res, next) {
     if (!name || !description || !icon || !requirement_type || requirement_value == null) {
       return res.status(400).json({ message: "Badge fields are required" });
     }
+    const bilingual = await isBilingualReady();
     const result = await query(
-      `INSERT INTO badges (name, name_en, name_id, description, description_en, description_id, icon, requirement_type, requirement_value)
-       VALUES (:name, :nameEn, :nameId, :description, :descriptionEn, :descriptionId, :icon, :requirementType, :requirementValue)`,
+      `INSERT INTO badges (name, ${bilingual ? "name_en, name_id, description_en, description_id," : ""} description, icon, requirement_type, requirement_value)
+       VALUES (:name, ${bilingual ? ":nameEn, :nameId, :descriptionEn, :descriptionId, " : ""} :description, :icon, :requirementType, :requirementValue)`,
       {
         name,
         nameEn: name_en || null,
         nameId: name_id || null,
-        description,
         descriptionEn: description_en || null,
         descriptionId: description_id || null,
+        description,
         icon,
         requirementType: requirement_type,
         requirementValue: requirement_value
@@ -934,10 +967,10 @@ export async function createBadge(req, res, next) {
 export async function updateBadge(req, res, next) {
   try {
     const { name, name_en, name_id, description, description_en, description_id, icon, requirement_type, requirement_value } = req.body;
+    const bilingual = await isBilingualReady();
     const result = await query(
       `UPDATE badges
-       SET name = :name, name_en = :nameEn, name_id = :nameId,
-           description = :description, description_en = :descriptionEn, description_id = :descriptionId,
+       SET name = :name, ${bilingual ? "name_en = :nameEn, name_id = :nameId, description_en = :descriptionEn, description_id = :descriptionId," : ""}
            icon = :icon, requirement_type = :requirementType, requirement_value = :requirementValue
        WHERE id = :id`,
       {
@@ -945,7 +978,6 @@ export async function updateBadge(req, res, next) {
         name,
         nameEn: name_en || null,
         nameId: name_id || null,
-        description,
         descriptionEn: description_en || null,
         descriptionId: description_id || null,
         icon,
@@ -974,16 +1006,17 @@ export async function createMilestone(req, res, next) {
   try {
     const { name, name_en, name_id, description, description_en, description_id, target_value } = req.body;
     if (!name || !description || target_value == null) return res.status(400).json({ message: "Milestone fields are required" });
+    const bilingual = await isBilingualReady();
     const result = await query(
-      `INSERT INTO milestones (name, name_en, name_id, description, description_en, description_id, target_value)
-       VALUES (:name, :nameEn, :nameId, :description, :descriptionEn, :descriptionId, :targetValue)`,
+      `INSERT INTO milestones (name, ${bilingual ? "name_en, name_id, description_en, description_id," : ""} description, target_value)
+       VALUES (:name, ${bilingual ? ":nameEn, :nameId, :descriptionEn, :descriptionId, " : ""} :description, :targetValue)`,
       {
         name,
         nameEn: name_en || null,
         nameId: name_id || null,
-        description,
         descriptionEn: description_en || null,
         descriptionId: description_id || null,
+        description,
         targetValue: target_value
       }
     );
@@ -996,20 +1029,20 @@ export async function createMilestone(req, res, next) {
 export async function updateMilestone(req, res, next) {
   try {
     const { name, name_en, name_id, description, description_en, description_id, target_value } = req.body;
+    const bilingual = await isBilingualReady();
     const result = await query(
       `UPDATE milestones
-       SET name = :name, name_en = :nameEn, name_id = :nameId,
-           description = :description, description_en = :descriptionEn, description_id = :descriptionId,
-           target_value = :targetValue
+       SET name = :name, ${bilingual ? "name_en = :nameEn, name_id = :nameId, description_en = :descriptionEn, description_id = :descriptionId," : ""}
+           description = :description, target_value = :targetValue
        WHERE id = :id`,
       {
         id: req.params.id,
         name,
         nameEn: name_en || null,
         nameId: name_id || null,
-        description,
         descriptionEn: description_en || null,
         descriptionId: description_id || null,
+        description,
         targetValue: target_value
       }
     );

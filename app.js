@@ -55,9 +55,14 @@ export function isAllowedOrigin(origin) {
   try {
     const url = new URL(origin);
     if (url.hostname === "admin.carbongo.site") return true;
-    const isDev = process.env.NODE_ENV !== "production";
+    const isPrivate = isPrivateLanHost(url.hostname);
     const isViteDevPort = Number(url.port) >= 5173 && Number(url.port) <= 5199;
-    return isDev && isPrivateLanHost(url.hostname) && isViteDevPort;
+    if (isPrivate && isViteDevPort) return true;
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev || !isPrivate || !isViteDevPort) {
+      console.warn(`[CORS] Rejected origin: ${origin} (isDev=${isDev}, isPrivate=${isPrivate}, isViteDevPort=${isViteDevPort})`);
+    }
+    return false;
   } catch {
     return false;
   }

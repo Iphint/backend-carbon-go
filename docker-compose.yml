@@ -58,7 +58,7 @@ services:
     ports:
       - "5001:5000"
     volumes:
-      - ../database:/app/database:ro
+      - ./database:/app/database:ro
     command: sh -c "npm start"
 
 volumes:

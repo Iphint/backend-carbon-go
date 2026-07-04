@@ -18,3 +18,20 @@ export async function query(sql, params = {}) {
   const [rows] = await pool.execute(sql, params);
   return rows;
 }
+
+let _bilingualReady = null;
+
+export async function isBilingualReady() {
+  if (_bilingualReady !== null) return _bilingualReady;
+  try {
+    const [rows] = await pool.query("SHOW COLUMNS FROM milestones LIKE 'name_en'");
+    _bilingualReady = rows.length > 0;
+  } catch {
+    _bilingualReady = false;
+  }
+  return _bilingualReady;
+}
+
+export function resetBilingualCheck() {
+  _bilingualReady = null;
+}
