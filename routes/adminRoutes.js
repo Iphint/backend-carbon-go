@@ -6,6 +6,7 @@ import {
   createMilestone,
   createQuest,
   customGreenActions,
+  dashboardPointSummary,
   dashboardSummary,
   deleteActivityLogAdmin,
   deleteBadge,
@@ -41,6 +42,7 @@ const router = Router();
 router.use(requireAuth, requireAdmin);
 
 router.get("/dashboard-summary", dashboardSummary);
+router.get("/dashboard-point-summary", dashboardPointSummary);
 router.get("/users", users);
 router.get("/survey-logs", surveyLogs);
 router.get("/users/:id", userById);

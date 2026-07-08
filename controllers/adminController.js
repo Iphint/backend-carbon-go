@@ -239,6 +239,54 @@ export async function dashboardSummary(req, res, next) {
   }
 }
 
+export async function dashboardPointSummary(req, res, next) {
+  try {
+    const group = req.query.group || "daily";
+
+    let dateExpr, orderExpr;
+    if (group === "monthly") {
+      dateExpr = "DATE_FORMAT(l.created_at + INTERVAL 7 HOUR, '%Y-%m')";
+      orderExpr = "MIN(l.created_at)";
+    } else if (group === "yearly") {
+      dateExpr = "YEAR(l.created_at + INTERVAL 7 HOUR)";
+      orderExpr = "MIN(l.created_at)";
+    } else {
+      dateExpr = "DATE(l.created_at + INTERVAL 7 HOUR)";
+      orderExpr = dateExpr;
+    }
+
+    const rows = await query(
+      `SELECT ${dateExpr} AS date,
+              SUM(CASE WHEN l.carbon_value > 0 THEN l.carbon_value ELSE 0 END) AS points_in,
+              SUM(CASE WHEN l.carbon_value < 0 THEN ABS(l.carbon_value) ELSE 0 END) AS points_out,
+              SUM(l.carbon_value) AS net_points,
+              COUNT(l.id) AS total_activities
+       FROM user_activity_logs l
+       JOIN users u ON u.id = l.user_id
+       WHERE u.role <> 'admin'
+       GROUP BY ${dateExpr}
+       ORDER BY ${orderExpr} ASC`
+    );
+
+    let runningTotal = 0;
+    const logs = rows.map((row) => {
+      runningTotal += Number(row.net_points || 0);
+      return {
+        date: String(row.date),
+        points_in: Number(row.points_in || 0),
+        points_out: Number(row.points_out || 0),
+        net_points: Number(row.net_points || 0),
+        cumulative: runningTotal,
+        total_activities: Number(row.total_activities || 0),
+      };
+    });
+
+    res.json({ logs });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function users(req, res, next) {
   try {
     const { page, limit, offset } = pageInfo(req);
@@ -825,21 +873,21 @@ export async function updateRankLog(req, res, next) {
 
     const rows = await query("SELECT id, name FROM rank_types WHERE id = :id", { id: req.params.id });
     if (!rows.length) return res.status(404).json({ message: "Rank type not found" });
-    if (ADMIN_RANK_TYPES.includes(rows[0].name)) {
-      return res.status(400).json({ message: "Default rank types cannot be edited" });
-    }
 
+    const isDefaultRank = ADMIN_RANK_TYPES.includes(rows[0].name);
+    // Preserve the original name for default ranks to prevent renaming
+    const effectiveName = isDefaultRank ? rows[0].name : rankName;
     const bilingual = await isBilingualReady();
     if (bilingual) {
       await query(
         `UPDATE rank_types
-         SET name = :rankName, name_en = :nameEn, name_id = :nameId,
+         SET ${isDefaultRank ? "" : "name = :rankName,"} name_en = :nameEn, name_id = :nameId,
              description_en = :descriptionEn, description_id = :descriptionId,
              milestone_id = :milestoneId, badge_id = :badgeId, quest_id = :questId
          WHERE id = :id`,
         {
           id: req.params.id,
-          rankName,
+          ...(isDefaultRank ? {} : { rankName }),
           nameEn: name_en || null,
           nameId: name_id || null,
           descriptionEn: description_en || null,
@@ -849,16 +897,18 @@ export async function updateRankLog(req, res, next) {
           questId: quest_id || null
         }
       );
-    } else {
+    } else if (!isDefaultRank) {
       await query(
         `UPDATE rank_types SET name = :rankName WHERE id = :id`,
         { id: req.params.id, rankName }
       );
     }
-    await query(
-      "UPDATE user_rank_achievements SET rank_name = :rankName WHERE rank_name = :oldRankName",
-      { rankName, oldRankName: rows[0].name }
-    );
+    if (!isDefaultRank) {
+      await query(
+        "UPDATE user_rank_achievements SET rank_name = :rankName WHERE rank_name = :oldRankName",
+        { rankName, oldRankName: rows[0].name }
+      );
+    }
 
     res.json({ message: "Rank type updated" });
   } catch (error) {
@@ -970,12 +1020,13 @@ export async function updateBadge(req, res, next) {
     const bilingual = await isBilingualReady();
     const result = await query(
       `UPDATE badges
-       SET name = :name, ${bilingual ? "name_en = :nameEn, name_id = :nameId, description_en = :descriptionEn, description_id = :descriptionId," : ""}
+       SET name = :name, description = :description, ${bilingual ? "name_en = :nameEn, name_id = :nameId, description_en = :descriptionEn, description_id = :descriptionId," : ""}
            icon = :icon, requirement_type = :requirementType, requirement_value = :requirementValue
        WHERE id = :id`,
       {
         id: req.params.id,
         name,
+        description,
         nameEn: name_en || null,
         nameId: name_id || null,
         descriptionEn: description_en || null,
