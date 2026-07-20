@@ -28,7 +28,7 @@ export async function getTodayCarbon(userId) {
     `SELECT COALESCE(SUM(carbon_value), 0) AS total
      FROM user_activity_logs
      WHERE user_id = :userId
-       AND DATE(CONVERT_TZ(created_at, '+00:00', '+07:00')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+07:00'))`,
+       AND DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'))`,
     { userId }
   );
   return Number(rows[0]?.total || 0);

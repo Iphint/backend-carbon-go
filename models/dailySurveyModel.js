@@ -24,9 +24,9 @@ export async function ensureDailySurveyTable() {
   dailySurveyTableReady = true;
 }
 
-export function jakartaDate(value = new Date()) {
+export function makassarDate(value = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Jakarta",
+    timeZone: "Asia/Makassar",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -35,19 +35,19 @@ export function jakartaDate(value = new Date()) {
   }).formatToParts(new Date(value));
 
   const get = (type) => parts.find((part) => part.type === type)?.value;
-  const jakartaHour = Number(get("hour") || 0);
-  const jakartaNoonUtc = new Date(`${get("year")}-${get("month")}-${get("day")}T12:00:00.000Z`);
+  const makassarHour = Number(get("hour") || 0);
+  const makassarNoonUtc = new Date(`${get("year")}-${get("month")}-${get("day")}T12:00:00.000Z`);
 
-  if (jakartaHour < 5) {
-    jakartaNoonUtc.setUTCDate(jakartaNoonUtc.getUTCDate() - 1);
+  if (makassarHour < 5) {
+    makassarNoonUtc.setUTCDate(makassarNoonUtc.getUTCDate() - 1);
   }
 
-  return jakartaNoonUtc.toISOString().slice(0, 10);
+  return makassarNoonUtc.toISOString().slice(0, 10);
 }
 
-export function nextJakartaSurveyReset(value = new Date()) {
+export function nextMakassarSurveyReset(value = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Jakarta",
+    timeZone: "Asia/Makassar",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -56,18 +56,18 @@ export function nextJakartaSurveyReset(value = new Date()) {
   }).formatToParts(new Date(value));
 
   const get = (type) => parts.find((part) => part.type === type)?.value;
-  const jakartaHour = Number(get("hour") || 0);
+  const makassarHour = Number(get("hour") || 0);
   const resetDay = new Date(`${get("year")}-${get("month")}-${get("day")}T12:00:00.000Z`);
 
-  if (jakartaHour >= 5) {
+  if (makassarHour >= 5) {
     resetDay.setUTCDate(resetDay.getUTCDate() + 1);
   }
 
-  return `${resetDay.toISOString().slice(0, 10)}T05:00:00+07:00`;
+  return `${resetDay.toISOString().slice(0, 10)}T05:00:00+08:00`;
 }
 
-export function surveyWindow(date = jakartaDate()) {
-  const start = new Date(`${date}T05:00:00+07:00`);
+export function surveyWindow(date = makassarDate()) {
+  const start = new Date(`${date}T05:00:00+08:00`);
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 1);
 
@@ -78,7 +78,7 @@ export function surveyWindow(date = jakartaDate()) {
   };
 }
 
-export async function getDailySurveyStatus(userId, date = jakartaDate()) {
+export async function getDailySurveyStatus(userId, date = makassarDate()) {
   await ensureDailySurveyTable();
   const window = surveyWindow(date);
 
@@ -102,7 +102,7 @@ export async function getDailySurveyStatus(userId, date = jakartaDate()) {
 
   return {
     survey_date: date,
-    next_reset_at: nextJakartaSurveyReset(),
+    next_reset_at: nextMakassarSurveyReset(),
     completed: Boolean(rows.length) || fallbackCompleted,
     log: rows[0] || (fallbackCompleted ? {
       user_id: userId,
@@ -113,7 +113,7 @@ export async function getDailySurveyStatus(userId, date = jakartaDate()) {
   };
 }
 
-export async function markDailySurveyComplete(userId, date = jakartaDate()) {
+export async function markDailySurveyComplete(userId, date = makassarDate()) {
   await ensureDailySurveyTable();
 
   await query(

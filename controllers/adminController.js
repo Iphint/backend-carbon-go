@@ -1,5 +1,5 @@
 import { query, isBilingualReady } from "../config/db.js";
-import { ensureDailySurveyTable, jakartaDate, nextJakartaSurveyReset, surveyWindow } from "../models/dailySurveyModel.js";
+import { ensureDailySurveyTable, makassarDate, nextMakassarSurveyReset, surveyWindow } from "../models/dailySurveyModel.js";
 import { getQuestCatalog, syncUserAwards } from "../models/progressModel.js";
 
 const PAGE_SIZE = 20;
@@ -142,7 +142,7 @@ function filterLogsClause(req, userId = null) {
   if (req.query.filter === "neutral") filters.push("l.activity_id IS NOT NULL AND l.carbon_value = 0");
   if (req.query.filter === "default") filters.push("l.activity_id IS NOT NULL AND l.carbon_value <> 0");
   if (req.query.date) {
-    filters.push("DATE(l.created_at + INTERVAL 7 HOUR) = :date");
+    filters.push("DATE(l.created_at + INTERVAL 8 HOUR) = :date");
     params.date = req.query.date;
   }
   return { where: filters.join(" AND "), params };
@@ -245,13 +245,13 @@ export async function dashboardPointSummary(req, res, next) {
 
     let dateExpr, orderExpr;
     if (group === "monthly") {
-      dateExpr = "DATE_FORMAT(l.created_at + INTERVAL 7 HOUR, '%Y-%m')";
+      dateExpr = "DATE_FORMAT(l.created_at + INTERVAL 8 HOUR, '%Y-%m')";
       orderExpr = "MIN(l.created_at)";
     } else if (group === "yearly") {
-      dateExpr = "YEAR(l.created_at + INTERVAL 7 HOUR)";
+      dateExpr = "YEAR(l.created_at + INTERVAL 8 HOUR)";
       orderExpr = "MIN(l.created_at)";
     } else {
-      dateExpr = "DATE(l.created_at + INTERVAL 7 HOUR)";
+      dateExpr = "DATE(l.created_at + INTERVAL 8 HOUR)";
       orderExpr = dateExpr;
     }
 
@@ -313,7 +313,7 @@ export async function users(req, res, next) {
 export async function surveyLogs(req, res, next) {
   try {
     await ensureDailySurveyTable();
-    const date = req.query.date || jakartaDate();
+    const date = req.query.date || makassarDate();
     const window = surveyWindow(date);
     const rows = await query(
       `SELECT u.id AS user_id,
@@ -342,7 +342,7 @@ export async function surveyLogs(req, res, next) {
       logs: rows,
       date,
       server_time: new Date().toISOString(),
-      next_reset_at: nextJakartaSurveyReset()
+      next_reset_at: nextMakassarSurveyReset()
     });
   } catch (error) {
     next(error);
@@ -361,26 +361,19 @@ export async function userSurveyLogs(req, res, next) {
     const history = await query(
       `SELECT survey_date,
               'completed' AS status,
-              MIN(first_entry_at) AS first_entry_at,
-              MAX(last_entry_at) AS last_entry_at
-       FROM (
-         SELECT survey_date,
-                completed_at AS first_entry_at,
-                completed_at AS last_entry_at
-         FROM daily_survey_logs
-         WHERE user_id = :userId
-
-         UNION ALL
-
-         SELECT DATE(created_at + INTERVAL 2 HOUR) AS survey_date,
-                MIN(created_at) AS first_entry_at,
-                MAX(created_at) AS last_entry_at
-         FROM user_activity_logs
-         WHERE user_id = :userId
-         GROUP BY DATE(created_at + INTERVAL 2 HOUR)
-       ) survey_history
-       GROUP BY survey_date
-       ORDER BY survey_date DESC`,
+              completed_at AS first_entry_at,
+              completed_at AS last_entry_at,
+              (
+                SELECT COUNT(*) + 1
+                FROM daily_survey_logs d2
+                WHERE d2.user_id = d1.user_id
+                  AND d2.survey_date = d1.survey_date
+                  AND (d2.completed_at < d1.completed_at
+                    OR (d2.completed_at = d1.completed_at AND d2.id < d1.id))
+              ) AS entry_index
+       FROM daily_survey_logs d1
+       WHERE d1.user_id = :userId
+       ORDER BY d1.survey_date DESC, d1.completed_at DESC`,
       { userId: req.params.id }
     );
 
@@ -423,14 +416,14 @@ export async function userPointLogs(req, res, next) {
 
     const rows = await query(
       `SELECT
-        DATE(l.created_at + INTERVAL 7 HOUR) AS date,
+        DATE(l.created_at + INTERVAL 8 HOUR) AS date,
         SUM(CASE WHEN l.carbon_value > 0 THEN l.carbon_value ELSE 0 END) AS points_in,
         SUM(CASE WHEN l.carbon_value < 0 THEN ABS(l.carbon_value) ELSE 0 END) AS points_out,
         SUM(l.carbon_value) AS net_points,
         COUNT(l.id) AS total_activities
       FROM user_activity_logs l
       WHERE l.user_id = :userId
-      GROUP BY DATE(l.created_at + INTERVAL 7 HOUR)
+      GROUP BY DATE(l.created_at + INTERVAL 8 HOUR)
       ORDER BY date ASC`,
       { userId }
     );
