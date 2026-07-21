@@ -363,17 +363,10 @@ export async function userSurveyLogs(req, res, next) {
               'completed' AS status,
               completed_at AS first_entry_at,
               completed_at AS last_entry_at,
-              (
-                SELECT COUNT(*) + 1
-                FROM daily_survey_logs d2
-                WHERE d2.user_id = d1.user_id
-                  AND d2.survey_date = d1.survey_date
-                  AND (d2.completed_at < d1.completed_at
-                    OR (d2.completed_at = d1.completed_at AND d2.id < d1.id))
-              ) AS entry_index
-       FROM daily_survey_logs d1
-       WHERE d1.user_id = :userId
-       ORDER BY d1.survey_date DESC, d1.completed_at DESC`,
+              1 AS entry_index
+       FROM daily_survey_logs
+       WHERE user_id = :userId
+       ORDER BY survey_date DESC, completed_at DESC`,
       { userId: req.params.id }
     );
 
@@ -414,7 +407,8 @@ export async function userPointLogs(req, res, next) {
   try {
     const userId = req.params.id;
 
-    const rows = await query(
+    // Daily aggregated data (for charts)
+    const dailyRows = await query(
       `SELECT
         DATE(l.created_at + INTERVAL 8 HOUR) AS date,
         SUM(CASE WHEN l.carbon_value > 0 THEN l.carbon_value ELSE 0 END) AS points_in,
@@ -429,7 +423,7 @@ export async function userPointLogs(req, res, next) {
     );
 
     let runningTotal = 0;
-    const logs = rows.map((row) => {
+    const logs = dailyRows.map((row) => {
       runningTotal += Number(row.net_points || 0);
       return {
         date: row.date,
@@ -441,7 +435,53 @@ export async function userPointLogs(req, res, next) {
       };
     });
 
-    res.json({ logs, total_cumulative: runningTotal });
+    // Individual entries with entry_index per date (for detail table)
+    const entries = await query(
+      `SELECT
+        DATE(l.created_at + INTERVAL 8 HOUR) AS date,
+        l.id,
+        l.carbon_value,
+        COALESCE(NULLIF(a.name_en, ''), a.name, l.other_activity, 'Other') AS name_en,
+        COALESCE(NULLIF(a.name_id, ''), a.name, l.other_activity, 'Other') AS name_id,
+        CASE
+          WHEN l.activity_id IS NULL THEN 'custom'
+          WHEN l.carbon_value > 0 THEN 'good'
+          WHEN l.carbon_value < 0 THEN 'bad'
+          ELSE 'neutral'
+        END AS type,
+        l.created_at,
+        l.note
+      FROM user_activity_logs l
+      LEFT JOIN activities a ON a.id = l.activity_id
+      WHERE l.user_id = :userId
+      ORDER BY DATE(l.created_at + INTERVAL 8 HOUR) ASC, l.created_at ASC`,
+      { userId }
+    );
+
+    // Add entry_index per date
+    let prevDate = null;
+    let idx = 0;
+    const detailedEntries = entries.map((e) => {
+      if (e.date !== prevDate) {
+        prevDate = e.date;
+        idx = 1;
+      } else {
+        idx++;
+      }
+      return {
+        date: e.date,
+        entry_index: idx,
+        id: e.id,
+        carbon_value: Number(e.carbon_value || 0),
+        name_en: e.name_en,
+        name_id: e.name_id,
+        type: e.type,
+        created_at: e.created_at,
+        note: e.note,
+      };
+    });
+
+    res.json({ logs, entries: detailedEntries, total_cumulative: runningTotal });
   } catch (error) {
     next(error);
   }
