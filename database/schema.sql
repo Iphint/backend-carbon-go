@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS password_reset_codes (
 INSERT INTO rank_types (name) VALUES
 ('Guest'),
 ('Explorer'),
+('Pioneer'),
 ('Guardian'),
 ('Hero')
 ON DUPLICATE KEY UPDATE name = VALUES(name);

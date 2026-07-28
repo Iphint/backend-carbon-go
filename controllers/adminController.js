@@ -3,7 +3,7 @@ import { ensureDailySurveyTable, makassarDate, nextMakassarSurveyReset, surveyWi
 import { getQuestCatalog, syncUserAwards } from "../models/progressModel.js";
 
 const PAGE_SIZE = 20;
-const ADMIN_RANK_TYPES = ["Guest", "Explorer", "Guardian", "Hero"];
+const ADMIN_RANK_TYPES = ["Guest", "Explorer", "Pioneer", "Guardian", "Hero"];
 
 function pageInfo(req) {
   const page = Math.max(1, Number(req.query.page || 1));
@@ -23,7 +23,7 @@ function dateRange(filter) {
 }
 
 function rankFromCounts({ questCount, badgeCount, milestoneCount }) {
-  return ADMIN_RANK_TYPES[Math.min(Number(questCount), Number(badgeCount), Number(milestoneCount), 3)] || "Guest";
+  return ADMIN_RANK_TYPES[Math.min(Number(questCount), Number(badgeCount), Number(milestoneCount), 4)] || "Guest";
 }
 
 async function ensureRankTypesTable() {
@@ -47,8 +47,11 @@ async function ensureRankTypesTable() {
     const bilingual = await isBilingualReady();
     if (bilingual) {
       await query(
-        `INSERT IGNORE INTO rank_types (name, name_en, name_id)
-         VALUES (:rankName, :rankName, :rankName)`,
+        `INSERT INTO rank_types (name, name_en, name_id)
+         VALUES (:rankName, :rankName, :rankName)
+         ON DUPLICATE KEY UPDATE
+           name_en = COALESCE(name_en, VALUES(name_en)),
+           name_id = COALESCE(name_id, VALUES(name_id))`,
         { rankName }
       );
     } else {
@@ -487,6 +490,98 @@ export async function userPointLogs(req, res, next) {
   }
 }
 
+export async function pointLogs(req, res, next) {
+  try {
+    const { userId, search, type, page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const conditions = [];
+    const params = {};
+    if (userId) {
+      conditions.push("l.user_id = :userId");
+      params.userId = userId;
+    }
+    if (search) {
+      conditions.push("u.username LIKE :search");
+      params.search = `%${search}%`;
+    }
+    if (type) {
+      if (type === "custom") {
+        conditions.push("l.activity_id IS NULL");
+      } else if (type === "good") {
+        conditions.push("l.carbon_value > 0 AND l.activity_id IS NOT NULL");
+      } else if (type === "bad") {
+        conditions.push("l.carbon_value < 0 AND l.activity_id IS NOT NULL");
+      } else if (type === "neutral") {
+        conditions.push("l.carbon_value = 0");
+      }
+    }
+    const whereClause = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
+
+    const safeLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const safeOffset = Math.max(0, parseInt(offset) || 0);
+
+    // Count total entries
+    const countResult = await query(
+      `SELECT COUNT(*) AS total FROM user_activity_logs l
+       JOIN users u ON u.id = l.user_id
+       ${whereClause}`,
+      params
+    );
+    const total = Number(countResult[0]?.total || 0);
+
+    // Individual entries with username (paginated)
+    const entries = await query(
+      `SELECT
+        l.id,
+        DATE(l.created_at + INTERVAL 8 HOUR) AS date,
+        u.username,
+        u.id AS user_id,
+        l.activity_id,
+        l.carbon_value,
+        COALESCE(NULLIF(a.name_en, ''), a.name, l.other_activity, 'Other') AS name_en,
+        COALESCE(NULLIF(a.name_id, ''), a.name, l.other_activity, 'Other') AS name_id,
+        CASE
+          WHEN l.activity_id IS NULL THEN 'custom'
+          WHEN l.carbon_value > 0 THEN 'good'
+          WHEN l.carbon_value < 0 THEN 'bad'
+          ELSE 'neutral'
+        END AS type,
+        l.created_at,
+        l.note
+      FROM user_activity_logs l
+      LEFT JOIN activities a ON a.id = l.activity_id
+      JOIN users u ON u.id = l.user_id
+      ${whereClause}
+      ORDER BY l.created_at DESC
+      LIMIT ${safeLimit} OFFSET ${safeOffset}`,
+      params
+    );
+
+    res.json({
+      entries: entries.map((e) => ({
+        id: e.id,
+        date: e.date,
+        username: e.username,
+        user_id: e.user_id,
+        activity_id: e.activity_id,
+        carbon_value: Number(e.carbon_value || 0),
+        name_en: e.name_en,
+        name_id: e.name_id,
+        type: e.type,
+        created_at: e.created_at,
+        note: e.note,
+      })),
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total_pages: Math.ceil(total / parseInt(limit)),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function customGreenActions(req, res, next) {
   try {
     const userFilter = req.params.id ? "AND l.user_id = :userId" : "";
@@ -822,7 +917,7 @@ export async function rankLogs(req, res, next) {
               ${bilingual ? ", rt.name_en, rt.name_id, rt.description_en, rt.description_id, rt.milestone_id, rt.badge_id, rt.quest_id, m.name AS milestone_name, b.name AS badge_name, q.name AS quest_name" : ""}
        FROM rank_types rt
        ${bilingual ? "LEFT JOIN milestones m ON m.id = rt.milestone_id LEFT JOIN badges b ON b.id = rt.badge_id LEFT JOIN quests q ON q.id = rt.quest_id" : ""}
-       ORDER BY FIELD(rt.name, 'Guest', 'Explorer', 'Guardian', 'Hero'), rt.name ASC`
+       ORDER BY FIELD(rt.name, 'Guest', 'Explorer', 'Pioneer', 'Guardian', 'Hero'), rt.name ASC`
     );
 
     res.json({

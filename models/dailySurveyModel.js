@@ -38,7 +38,7 @@ export function makassarDate(value = new Date()) {
   const makassarHour = Number(get("hour") || 0);
   const makassarNoonUtc = new Date(`${get("year")}-${get("month")}-${get("day")}T12:00:00.000Z`);
 
-  if (makassarHour < 5) {
+  if (makassarHour < 12) {
     makassarNoonUtc.setUTCDate(makassarNoonUtc.getUTCDate() - 1);
   }
 
@@ -59,15 +59,15 @@ export function nextMakassarSurveyReset(value = new Date()) {
   const makassarHour = Number(get("hour") || 0);
   const resetDay = new Date(`${get("year")}-${get("month")}-${get("day")}T12:00:00.000Z`);
 
-  if (makassarHour >= 5) {
+  if (makassarHour >= 12) {
     resetDay.setUTCDate(resetDay.getUTCDate() + 1);
   }
 
-  return `${resetDay.toISOString().slice(0, 10)}T05:00:00+08:00`;
+  return `${resetDay.toISOString().slice(0, 10)}T12:00:00+08:00`;
 }
 
 export function surveyWindow(date = makassarDate()) {
-  const start = new Date(`${date}T05:00:00+08:00`);
+  const start = new Date(`${date}T12:00:00+08:00`);
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 1);
 

@@ -108,10 +108,10 @@ export async function getQuestCatalog(totalCarbon = 0) {
   }));
 }
 
-const rankOrder = ["Guest", "Explorer", "Guardian", "Hero"];
+const rankOrder = ["Guest", "Explorer", "Pioneer", "Guardian", "Hero"];
 
 export function rankFromCounts({ questCount, badgeCount, milestoneCount }) {
-  const completedSets = Math.min(Number(questCount), Number(badgeCount), Number(milestoneCount), 3);
+  const completedSets = Math.min(Number(questCount), Number(badgeCount), Number(milestoneCount), 4);
   return rankOrder[completedSets] || "Guest";
 }
 

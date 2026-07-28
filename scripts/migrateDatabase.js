@@ -8,7 +8,7 @@ import { loadEnv } from "../config/loadEnv.js";
 loadEnv();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const databaseDir = join(__dirname, "../../database");
+const databaseDir = join(__dirname, "../database");
 const dbName = process.env.DB_NAME || "carbon_go";
 const allowDestructiveMigrations = process.env.ALLOW_DESTRUCTIVE_MIGRATIONS === "true";
 

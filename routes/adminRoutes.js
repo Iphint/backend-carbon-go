@@ -18,6 +18,7 @@ import {
   ecoBadges,
   leaderboard,
   milestones,
+  pointLogs,
   quests,
   createRankLog,
   rankLogs,
@@ -51,6 +52,7 @@ router.get("/users/:id/activity-logs", userActivityLogs);
 router.get("/users/:id/custom-green-actions", customGreenActions);
 router.get("/users/:id/progress", userProgress);
 router.get("/users/:id/rank-logs", rankLogs);
+router.get("/point-logs", pointLogs);
 router.get("/users/:id/point-logs", userPointLogs);
 router.get("/users/:id/survey-logs", userSurveyLogs);
 router.get("/activity-logs", activityLogs);
