@@ -61,5 +61,16 @@ services:
       - ./database:/app/database:ro
     command: sh -c "npm start"
 
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: carbon-go-translate
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
+    environment:
+      - LT_LOAD_ONLY=en,id
+      - LT_MAX_LENGTH=500
+      - LT_THREADS=1
+
 volumes:
   carbon_go_mysql_data:

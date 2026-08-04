@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   activityLogs,
+  createActivityLogAdmin,
   createBadge,
   createCustomGreenAction,
   createMilestone,
@@ -56,6 +57,7 @@ router.get("/point-logs", pointLogs);
 router.get("/users/:id/point-logs", userPointLogs);
 router.get("/users/:id/survey-logs", userSurveyLogs);
 router.get("/activity-logs", activityLogs);
+router.post("/activity-logs", createActivityLogAdmin);
 router.put("/activity-logs/:id", updateActivityLog);
 router.delete("/activity-logs/:id", deleteActivityLogAdmin);
 router.get("/custom-green-actions", customGreenActions);

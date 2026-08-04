@@ -443,6 +443,7 @@ export async function userPointLogs(req, res, next) {
       `SELECT
         DATE(l.created_at + INTERVAL 8 HOUR) AS date,
         l.id,
+        l.activity_id,
         l.carbon_value,
         COALESCE(NULLIF(a.name_en, ''), a.name, l.other_activity, 'Other') AS name_en,
         COALESCE(NULLIF(a.name_id, ''), a.name, l.other_activity, 'Other') AS name_id,
@@ -475,6 +476,7 @@ export async function userPointLogs(req, res, next) {
         date: e.date,
         entry_index: idx,
         id: e.id,
+        activity_id: e.activity_id || null,
         carbon_value: Number(e.carbon_value || 0),
         name_en: e.name_en,
         name_id: e.name_id,
@@ -1067,7 +1069,7 @@ export async function deleteRankLog(req, res, next) {
 
 export async function updateActivityLog(req, res, next) {
   try {
-    const { user_id, activity_id, other_activity, carbon_value, note } = req.body;
+    const { user_id, activity_id, other_activity, carbon_value, note, date } = req.body;
     const existing = await query("SELECT user_id FROM user_activity_logs WHERE id = :id", { id: req.params.id });
     if (!existing.length) return res.status(404).json({ message: "Activity log not found" });
 
@@ -1078,6 +1080,8 @@ export async function updateActivityLog(req, res, next) {
       nextCarbonValue = Number(activities[0].carbon_value);
     }
 
+    const createdAt = date ? `${String(date).split("T")[0]} 12:00:00` : null;
+
     await query(
       `UPDATE user_activity_logs
        SET user_id = COALESCE(:userId, user_id),
@@ -1085,6 +1089,7 @@ export async function updateActivityLog(req, res, next) {
            other_activity = :otherActivity,
            carbon_value = :carbonValue,
            note = :note
+           ${createdAt ? ", created_at = :createdAt" : ""}
        WHERE id = :id`,
       {
         id: req.params.id,
@@ -1092,11 +1097,47 @@ export async function updateActivityLog(req, res, next) {
         activityId: activity_id || null,
         otherActivity: activity_id ? null : other_activity || null,
         carbonValue: nextCarbonValue,
-        note: note || null
+        note: note || null,
+        ...(createdAt ? { createdAt } : {})
       }
     );
     await syncUserAwards(user_id || existing[0].user_id);
     res.json({ message: "Activity log updated" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createActivityLogAdmin(req, res, next) {
+  try {
+    const { user_id, activity_id, other_activity, carbon_value, note, date } = req.body;
+    if (!user_id) return res.status(400).json({ message: "user_id is required" });
+
+    let nextCarbonValue = Number(carbon_value || 0);
+    if (activity_id) {
+      const activities = await query("SELECT carbon_value FROM activities WHERE id = :activityId", { activityId: activity_id });
+      if (!activities.length) return res.status(404).json({ message: "Activity not found" });
+      nextCarbonValue = Number(activities[0].carbon_value);
+    } else if (!other_activity) {
+      return res.status(400).json({ message: "Activity name is required for custom entries" });
+    }
+
+    const createdAt = date ? `${String(date).split("T")[0]} 12:00:00` : new Date();
+
+    const result = await query(
+      `INSERT INTO user_activity_logs (user_id, activity_id, other_activity, carbon_value, note, created_at)
+       VALUES (:userId, :activityId, :otherActivity, :carbonValue, :note, :createdAt)`,
+      {
+        userId: user_id,
+        activityId: activity_id || null,
+        otherActivity: activity_id ? null : other_activity || null,
+        carbonValue: nextCarbonValue,
+        note: note || null,
+        createdAt
+      }
+    );
+    await syncUserAwards(user_id);
+    res.status(201).json({ message: "Activity log created", id: result.insertId });
   } catch (error) {
     next(error);
   }
