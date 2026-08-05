@@ -142,8 +142,7 @@ function filterLogsClause(req, userId = null) {
   if (req.query.filter === "good") filters.push("l.carbon_value > 0");
   if (req.query.filter === "bad") filters.push("l.carbon_value < 0");
   if (req.query.filter === "custom") filters.push("l.activity_id IS NULL");
-  if (req.query.filter === "neutral") filters.push("l.activity_id IS NOT NULL AND l.carbon_value = 0");
-  if (req.query.filter === "default") filters.push("l.activity_id IS NOT NULL AND l.carbon_value <> 0");
+  if (req.query.filter === "default") filters.push("l.activity_id IS NOT NULL");
   if (req.query.date) {
     filters.push("DATE(l.created_at + INTERVAL 8 HOUR) = :date");
     params.date = req.query.date;
@@ -159,23 +158,19 @@ async function getLogs(req, userId = null) {
   const countRows = await query(`SELECT COUNT(*) AS total FROM user_activity_logs l WHERE ${where}`, params);
   const logs = await query(
     `SELECT l.id, l.user_id, u.username, l.created_at AS date,
-            COALESCE(NULLIF(${activityNameColumn}, ''), a.name, l.other_activity, 'Other') AS name,
-            CASE
-              WHEN l.activity_id IS NULL THEN 'custom'
-              WHEN l.carbon_value > 0 THEN 'good'
-              WHEN l.carbon_value < 0 THEN 'bad'
-              ELSE 'neutral'
-            END AS type,
-            l.carbon_value AS unit,
-            a.category,
-            GREATEST(l.carbon_value, 0) AS eco_point,
-            CASE WHEN l.carbon_value > 0 THEN 1 ELSE 0 END AS is_good,
-            CASE
-              WHEN l.activity_id IS NULL THEN 'custom'
-              WHEN l.carbon_value = 0 THEN 'neutral'
-              ELSE 'default'
-            END AS source,
-            COALESCE(l.note, '') AS description
+             COALESCE(NULLIF(${activityNameColumn}, ''), a.name, l.other_activity, 'Other') AS name,
+             CASE
+               WHEN l.carbon_value > 0 THEN 'good'
+               WHEN l.carbon_value < 0 THEN 'bad'
+               ELSE 'neutral'
+             END AS type,
+             l.carbon_value AS unit,
+             COALESCE(a.category, 'custom') AS category,
+             CASE
+               WHEN l.activity_id IS NULL THEN 'custom'
+               ELSE 'default'
+             END AS source,
+             COALESCE(l.note, '') AS description
      FROM user_activity_logs l
      JOIN users u ON u.id = l.user_id
      LEFT JOIN activities a ON a.id = l.activity_id
