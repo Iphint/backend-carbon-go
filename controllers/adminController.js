@@ -443,7 +443,6 @@ export async function userPointLogs(req, res, next) {
         COALESCE(NULLIF(a.name_en, ''), a.name, l.other_activity, 'Other') AS name_en,
         COALESCE(NULLIF(a.name_id, ''), a.name, l.other_activity, 'Other') AS name_id,
         CASE
-          WHEN l.activity_id IS NULL THEN 'custom'
           WHEN l.carbon_value > 0 THEN 'good'
           WHEN l.carbon_value < 0 THEN 'bad'
           ELSE 'neutral'
@@ -539,7 +538,6 @@ export async function pointLogs(req, res, next) {
         COALESCE(NULLIF(a.name_en, ''), a.name, l.other_activity, 'Other') AS name_en,
         COALESCE(NULLIF(a.name_id, ''), a.name, l.other_activity, 'Other') AS name_id,
         CASE
-          WHEN l.activity_id IS NULL THEN 'custom'
           WHEN l.carbon_value > 0 THEN 'good'
           WHEN l.carbon_value < 0 THEN 'bad'
           ELSE 'neutral'
@@ -1069,7 +1067,7 @@ export async function updateActivityLog(req, res, next) {
     if (!existing.length) return res.status(404).json({ message: "Activity log not found" });
 
     let nextCarbonValue = Number(carbon_value || 0);
-    if (activity_id) {
+    if (activity_id && carbon_value === undefined) {
       const activities = await query("SELECT carbon_value FROM activities WHERE id = :activityId", { activityId: activity_id });
       if (!activities.length) return res.status(404).json({ message: "Activity not found" });
       nextCarbonValue = Number(activities[0].carbon_value);
