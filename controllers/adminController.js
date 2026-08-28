@@ -143,6 +143,23 @@ function filterLogsClause(req, userId = null) {
   if (req.query.filter === "bad") filters.push("l.carbon_value < 0");
   if (req.query.filter === "custom") filters.push("l.activity_id IS NULL");
   if (req.query.filter === "default") filters.push("l.activity_id IS NOT NULL");
+  if (req.query.category) {
+    filters.push("a.category = :category");
+    params.category = req.query.category;
+  }
+  if (req.query.action) {
+    if (req.query.action === "good") filters.push("l.carbon_value > 0");
+    else if (req.query.action === "bad") filters.push("l.carbon_value < 0");
+    else if (req.query.action === "neutral") filters.push("l.carbon_value = 0");
+  }
+  if (req.query.activity) {
+    if (req.query.activity === "other") {
+      filters.push("l.activity_id IS NULL");
+    } else {
+      filters.push("l.activity_id = :activityId");
+      params.activityId = req.query.activity;
+    }
+  }
   if (req.query.date) {
     filters.push("DATE(l.created_at + INTERVAL 8 HOUR) = :date");
     params.date = req.query.date;
@@ -155,7 +172,10 @@ async function getLogs(req, userId = null) {
   const { where, params } = filterLogsClause(req, userId);
   const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
   const activityNameColumn = lang === "en" ? "a.name_en" : "a.name_id";
-  const countRows = await query(`SELECT COUNT(*) AS total FROM user_activity_logs l WHERE ${where}`, params);
+
+  const needsActivityJoin = req.query.category || req.query.activity;
+  const countJoin = needsActivityJoin ? "LEFT JOIN activities a ON a.id = l.activity_id" : "";
+  const countRows = await query(`SELECT COUNT(*) AS total FROM user_activity_logs l ${countJoin} WHERE ${where}`, params);
   const logs = await query(
     `SELECT l.id, l.user_id, u.username, l.created_at AS date,
              COALESCE(NULLIF(${activityNameColumn}, ''), a.name, l.other_activity, 'Other') AS name,
@@ -580,6 +600,347 @@ export async function pointLogs(req, res, next) {
   }
 }
 
+export async function customGreenActions(req, res, next) {
+  try {
+    const userFilter = req.params.id ? "AND l.user_id = :userId" : "";
+    const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const rows = await query(
+      `SELECT l.id, l.user_id, u.username,
+              COALESCE(l.other_activity, 'Custom activity') AS name,
+              COALESCE(l.note, '') AS description,
+              'custom' AS category,
+              0 AS eco_point,
+              COALESCE(l.note, 'Recorded as a neutral custom action.') AS feedback,
+              :recommendation AS recommendation,
+              l.created_at
+       FROM user_activity_logs l
+       JOIN users u ON u.id = l.user_id
+       WHERE l.activity_id IS NULL ${userFilter}
+       ORDER BY l.created_at DESC`,
+      {
+        userId: req.params.id || null,
+        recommendation: lang === "en"
+          ? "Use standard activities when possible so Journey Points can be measured."
+          : "Gunakan aktivitas standar jika memungkinkan agar Poin Perjalanan bisa dihitung."
+      }
+    );
+    res.json({ actions: rows });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createCustomGreenAction(req, res, next) {
+  try {
+    const { user_id, name, description } = req.body;
+    if (!user_id || !name) return res.status(400).json({ message: "user_id and name are required" });
+    const result = await query(
+      `INSERT INTO user_activity_logs (user_id, activity_id, other_activity, carbon_value, note)
+       VALUES (:userId, NULL, :name, 0, :description)`,
+      { userId: user_id, name, description: description || null }
+    );
+    await syncUserAwards(user_id);
+    res.status(201).json({ message: "Custom green action created", id: result.insertId });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateCustomGreenAction(req, res, next) {
+  try {
+    const { user_id, name, description } = req.body;
+    if (!name) return res.status(400).json({ message: "name is required" });
+    const existing = await query("SELECT user_id FROM user_activity_logs WHERE id = :id AND activity_id IS NULL", { id: req.params.id });
+    if (!existing.length) return res.status(404).json({ message: "Custom green action not found" });
+    await query(
+      `UPDATE user_activity_logs
+       SET user_id = COALESCE(:userId, user_id), other_activity = :name, note = :description
+       WHERE id = :id AND activity_id IS NULL`,
+      { id: req.params.id, userId: user_id || null, name, description: description || null }
+    );
+    await syncUserAwards(user_id || existing[0].user_id);
+    res.json({ message: "Custom green action updated" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteCustomGreenAction(req, res, next) {
+  try {
+    const existing = await query("SELECT user_id FROM user_activity_logs WHERE id = :id AND activity_id IS NULL", { id: req.params.id });
+    if (!existing.length) return res.status(404).json({ message: "Custom green action not found" });
+    await query("DELETE FROM user_activity_logs WHERE id = :id AND activity_id IS NULL", { id: req.params.id });
+    await syncUserAwards(existing[0].user_id);
+    res.json({ message: "Custom green action deleted" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function userProgress(req, res, next) {
+  try {
+    const userId = req.params.id;
+    const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const bilingual = await isBilingualReady();
+    const awards = await syncUserAwards(userId);
+    const [badges, milestones] = await Promise.all([
+      query(
+        `SELECT b.id, b.name, b.description, b.icon,
+                ${bilingual ? `CASE
+                  WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Carbon Unit (CU)')
+                  ELSE CONCAT('Dapatkan ', b.requirement_value, ' Carbon Unit (CU)')
+                END AS requirement,` : ""}
+                CASE WHEN ub.id IS NULL THEN 0 ELSE 1 END AS achieved,
+                ub.earned_at AS achieved_at
+         FROM badges b
+         LEFT JOIN user_badges ub ON ub.badge_id = b.id AND ub.user_id = :userId
+         WHERE b.name <> 'Earth Guardian'
+         ORDER BY b.requirement_value`,
+        { userId, lang }
+      ),
+      query(
+        `SELECT m.id, m.name, m.description, m.target_value AS target,
+                COALESCE(um.progress_value, 0) AS progress,
+                COALESCE(um.is_completed, 0) AS achieved,
+                um.completed_at AS achieved_at
+         FROM milestones m
+         LEFT JOIN user_milestones um ON um.milestone_id = m.id AND um.user_id = :userId
+         ORDER BY m.target_value`,
+        { userId }
+      )
+    ]);
+    const quests = awards.quests.map((quest) => ({
+      id: quest.id,
+      name: quest.name,
+      description: quest.description,
+      progress: quest.progress_value,
+      target: quest.requirement_value,
+      active: !quest.is_completed && quest.progress_value > 0,
+      completed: quest.is_completed,
+      completed_at: quest.is_completed ? new Date() : null
+    }));
+    res.json({ milestones, badges, quests, current_rank: awards.currentRank });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function ecoBadges(req, res, next) {
+  try {
+    const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const bilingual = await isBilingualReady();
+    const rows = await query(
+      `SELECT b.id, b.name, b.icon, b.requirement_type, b.requirement_value,
+              ${bilingual ? "b.name_en, b.name_id, b.description_en, b.description_id," : ""}
+              b.description,
+              ${bilingual ? `CASE WHEN :lang = 'en' THEN COALESCE(b.name_en, b.name) ELSE COALESCE(b.name_id, b.name) END AS display_name,
+              CASE WHEN :lang = 'en' THEN COALESCE(b.description_en, b.description) ELSE COALESCE(b.description_id, b.description) END AS display_description,` : ""}
+              CASE
+                WHEN :lang = 'en' THEN CONCAT('Earn ', b.requirement_value, ' Carbon Unit (CU)')
+                ELSE CONCAT('Dapatkan ', b.requirement_value, ' Carbon Unit (CU)')
+              END AS requirement,
+              COUNT(ub.id) AS achieved_count,
+              MAX(ub.earned_at) AS achieved_at,
+              CASE WHEN COUNT(ub.id) > 0 THEN 1 ELSE 0 END AS achieved
+       FROM badges b
+       LEFT JOIN user_badges ub ON ub.badge_id = b.id
+       WHERE b.name <> 'Earth Guardian'
+       GROUP BY b.id
+       ORDER BY b.requirement_value`,
+      { lang }
+    );
+    res.json({ badges: rows });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function quests(req, res, next) {
+  try {
+    const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const bilingual = await isBilingualReady();
+    const catalog = await getQuestCatalog(0);
+    const achievementRows = await query(
+      `SELECT q.id, COUNT(t.user_id) AS achieved_count
+       FROM quests q
+       LEFT JOIN (
+         SELECT u.id AS user_id, COALESCE(SUM(l.carbon_value), 0) AS total_carbon
+         FROM users u
+         LEFT JOIN user_activity_logs l ON l.user_id = u.id
+         WHERE u.role <> 'admin'
+         GROUP BY u.id
+       ) t ON t.total_carbon >= q.requirement_value
+       WHERE q.is_active = 1
+       GROUP BY q.id`
+    );
+    const achievedByQuestId = Object.fromEntries(
+      achievementRows.map((row) => [String(row.id), Number(row.achieved_count || 0)])
+    );
+    const rows = catalog.map((quest) => ({
+      id: quest.id,
+      slug: quest.slug,
+      icon: quest.icon,
+      name: quest.name,
+      name_en: quest.name_en,
+      name_id: quest.name_id,
+      description: quest.description,
+      description_en: quest.description_en,
+      description_id: quest.description_id,
+      display_name: bilingual ? (lang === 'en' ? (quest.name_en || quest.name) : (quest.name_id || quest.name)) : quest.name,
+      display_description: bilingual ? (lang === 'en' ? (quest.description_en || quest.description) : (quest.description_id || quest.description)) : quest.description,
+      progress: 0,
+      target: quest.requirement_value,
+      requirement_value: quest.requirement_value,
+      reward: quest.reward,
+      is_active: quest.is_active,
+      active: true,
+      completed: false,
+      achieved_count: achievedByQuestId[String(quest.id)] || 0
+    }));
+    res.json({ quests: rows });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createQuest(req, res, next) {
+  try {
+    const { slug, icon, name, name_en, name_id, description, description_en, description_id, requirement_value, reward, is_active } = req.body;
+    if (!slug || !name || !description || requirement_value == null) {
+      return res.status(400).json({ message: "slug, name, description, and requirement_value are required" });
+    }
+    const bilingual = await isBilingualReady();
+    const result = await query(
+      `INSERT INTO quests (slug, icon, name, ${bilingual ? "name_en, name_id, description_en, description_id," : ""} description, requirement_value, reward, is_active)
+       VALUES (:slug, :icon, :name, ${bilingual ? ":nameEn, :nameId, :descriptionEn, :descriptionId, " : ""} :description, :requirementValue, :reward, :isActive)`,
+      {
+        slug,
+        icon: icon || "🌱",
+        name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        description,
+        requirementValue: Number(requirement_value),
+        reward: Number(reward || 25),
+        isActive: is_active === false || is_active === 0 ? 0 : 1
+      }
+    );
+    res.status(201).json({ message: "Quest created", id: result.insertId });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateQuest(req, res, next) {
+  try {
+    const { slug, icon, name, name_en, name_id, description, description_en, description_id, requirement_value, reward, is_active } = req.body;
+    const bilingual = await isBilingualReady();
+    const result = await query(
+      `UPDATE quests
+       SET slug = :slug, icon = :icon, name = :name, ${bilingual ? "name_en = :nameEn, name_id = :nameId, description_en = :descriptionEn, description_id = :descriptionId," : ""}
+           description = :description, requirement_value = :requirementValue, reward = :reward, is_active = :isActive
+       WHERE id = :id`,
+      {
+        id: req.params.id,
+        slug,
+        icon: icon || "🌱",
+        name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        description,
+        requirementValue: Number(requirement_value),
+        reward: Number(reward || 25),
+        isActive: is_active === false || is_active === 0 ? 0 : 1
+      }
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: "Quest not found" });
+    res.json({ message: "Quest updated" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteQuest(req, res, next) {
+  try {
+    const result = await query("DELETE FROM quests WHERE id = :id", { id: req.params.id });
+    if (!result.affectedRows) return res.status(404).json({ message: "Quest not found" });
+    res.json({ message: "Quest deleted" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createBadge(req, res, next) {
+  try {
+    const { name, name_en, name_id, description, description_en, description_id, icon, requirement_type, requirement_value } = req.body;
+    if (!name || !description || !icon || !requirement_type || requirement_value == null) {
+      return res.status(400).json({ message: "Badge fields are required" });
+    }
+    const bilingual = await isBilingualReady();
+    const result = await query(
+      `INSERT INTO badges (name, ${bilingual ? "name_en, name_id, description_en, description_id," : ""} description, icon, requirement_type, requirement_value)
+       VALUES (:name, ${bilingual ? ":nameEn, :nameId, :descriptionEn, :descriptionId, " : ""} :description, :icon, :requirementType, :requirementValue)`,
+      {
+        name,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        description,
+        icon,
+        requirementType: requirement_type,
+        requirementValue: requirement_value
+      }
+    );
+    res.status(201).json({ message: "Badge created", id: result.insertId });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateBadge(req, res, next) {
+  try {
+    const { name, name_en, name_id, description, description_en, description_id, icon, requirement_type, requirement_value } = req.body;
+    const bilingual = await isBilingualReady();
+    const result = await query(
+      `UPDATE badges
+       SET name = :name, description = :description, ${bilingual ? "name_en = :nameEn, name_id = :nameId, description_en = :descriptionEn, description_id = :descriptionId," : ""}
+           icon = :icon, requirement_type = :requirementType, requirement_value = :requirementValue
+       WHERE id = :id`,
+      {
+        id: req.params.id,
+        name,
+        description,
+        nameEn: name_en || null,
+        nameId: name_id || null,
+        descriptionEn: description_en || null,
+        descriptionId: description_id || null,
+        icon,
+        requirementType: requirement_type,
+        requirementValue: requirement_value
+      }
+    );
+    if (!result.affectedRows) return res.status(404).json({ message: "Badge not found" });
+    res.json({ message: "Badge updated" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteBadge(req, res, next) {
+  try {
+    const result = await query("DELETE FROM badges WHERE id = :id", { id: req.params.id });
+    if (!result.affectedRows) return res.status(404).json({ message: "Badge not found" });
+    res.json({ message: "Badge deleted" });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function milestones(req, res, next) {
   try {
     const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
@@ -938,12 +1299,47 @@ export async function leaderboard(req, res, next) {
   }
 }
 
+export async function getActivities(req, res, next) {
+  try {
+    const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
+    const activityNameColumn = lang === "en" ? "a.name_en" : "a.name_id";
+    const category = req.query.category;
+    const action = req.query.action;
+
+    let where = "1 = 1";
+    const params = {};
+    if (category) {
+      where += " AND a.category = :category";
+      params.category = category;
+    }
+    if (action) {
+      if (action === "good") where += " AND a.carbon_value > 0";
+      else if (action === "bad") where += " AND a.carbon_value < 0";
+      else if (action === "neutral") where += " AND a.carbon_value = 0";
+    }
+
+    const rows = await query(
+      `SELECT a.id,
+              COALESCE(NULLIF(${activityNameColumn}, ''), a.name) AS name,
+              a.category, a.carbon_value
+       FROM activities a
+       WHERE ${where}
+       ORDER BY a.category, a.carbon_value DESC`,
+      params
+    );
+
+    res.json({ activities: rows });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function activityStats(req, res, next) {
   try {
     const lang = String(req.query.lang || req.headers["x-language"] || "id").toLowerCase();
     const activityNameColumn = lang === "en" ? "a.name_en" : "a.name_id";
 
-    const [mostFrequent, mostPositive, mostNegative] = await Promise.all([
+    const [mostFrequent, mostPositive, mostNegative, dominantCategories] = await Promise.all([
       query(
         `SELECT a.id,
                 COALESCE(NULLIF(${activityNameColumn}, ''), a.name) AS name,
@@ -984,6 +1380,16 @@ export async function activityStats(req, res, next) {
          GROUP BY a.id, a.name, a.name_en, a.name_id, a.category, a.carbon_value
          ORDER BY total_carbon DESC
          LIMIT 10`
+      ),
+      query(
+        `SELECT a.category, COUNT(l.id) AS total_count
+         FROM user_activity_logs l
+         JOIN activities a ON a.id = l.activity_id
+         JOIN users u ON u.id = l.user_id
+         WHERE u.role <> 'admin'
+         GROUP BY a.category
+         ORDER BY total_count DESC
+         LIMIT 5`
       )
     ]);
 
@@ -1001,6 +1407,10 @@ export async function activityStats(req, res, next) {
         id: r.id, name: r.name, category: r.category,
         carbon_value: Number(r.carbon_value), total_count: Number(r.total_count),
         total_carbon: Number(r.total_carbon)
+      })),
+      dominant_categories: dominantCategories.map((r) => ({
+        category: r.category,
+        total_count: Number(r.total_count)
       }))
     });
   } catch (error) {
